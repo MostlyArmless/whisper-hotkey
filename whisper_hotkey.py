@@ -48,6 +48,7 @@ class WhisperHotkeyApp:
         self.nc_proc = None
         self.text_queue = queue.Queue()
         self.seen_segments = set()
+        self.recording_start_time = None  # Track when recording starts
         
         # Create transcript file path
         self.transcript_path = Path.home() / "whisper-transcript.txt"
@@ -92,8 +93,21 @@ class WhisperHotkeyApp:
     def process_text_queue(self):
         try:
             while True:
-                text = self.text_queue.get_nowait()
-                self.type_text(text)
+                text, received_time, chunk_duration, chunk_start_time = self.text_queue.get_nowait()
+                typed_time = time.time() - self.recording_start_time
+                
+                # Calculate latencies
+                processing_latency = received_time - chunk_start_time  # Time from audio capture to server response
+                total_latency = typed_time - chunk_start_time  # Total time from audio to typed output
+                
+                self.type_text(text + " ")
+                
+                print(f"\nLatency Analysis:")
+                print(f"Chunk duration: {chunk_duration:.2f}s")
+                print(f"Processing latency: {processing_latency:.2f}s")
+                print(f"Total latency: {total_latency:.2f}s")
+                print(f"Realtime factor: {chunk_duration/processing_latency:.2f}x")
+                
                 self.text_queue.task_done()
         except queue.Empty:
             pass
@@ -104,19 +118,27 @@ class WhisperHotkeyApp:
             try:
                 line = self.nc_proc.stdout.readline().decode().strip()
                 if line:
+                    received_time = time.time() - self.recording_start_time
                     print(f"Received line: {line}")
                     parts = line.split('  ', 1)
                     if len(parts) == 2:
                         timestamp, text = parts
+                        # Parse the whisper timestamps (they're in milliseconds)
+                        start_ms, end_ms = map(int, timestamp.split())
+                        chunk_duration = (end_ms - start_ms) / 1000  # Convert to seconds
+                        chunk_start_time = start_ms / 1000  # When in the audio this chunk starts
+                        
                         if timestamp not in self.seen_segments:
                             self.seen_segments.add(timestamp)
-                            self.text_queue.put(text + " ")
+                            # Queue both text and timing info
+                            self.text_queue.put((text, received_time, chunk_duration, chunk_start_time))
             except Exception as e:
                 print(f"Error reading output: {e}")
                 break
 
     def start_recording(self):
         try:
+            self.recording_start_time = time.time()
             self.audio_proc = subprocess.Popen(
                 ['arecord', '-f', 'S16_LE', '-c1', '-r', '16000', '-t', 'raw', '-D', 'default'],
                 stdout=subprocess.PIPE,
