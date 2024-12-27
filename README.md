@@ -1,6 +1,6 @@
 # Whisper Hotkey
 
-This depends on you running `whisper_streaming_server.py` on another local machine with the good GPU like this:
+This depends on you running [`whisper_online_server.py`](https://github.com/ufal/whisper_streaming/blob/main/whisper_online_server.py) on another local machine with a good GPU like this:
 
 ```bash
 export LD_LIBRARY_PATH=`python3 -c 'import os; import nvidia.cublas.lib; import nvidia.cudnn.lib; print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))'`
