@@ -15,6 +15,10 @@ import time
 import queue
 import logging
 from dataclasses import dataclass
+import argparse
+import json
+from typing import Optional, Set, Tuple, NamedTuple
+from pathlib import Path
 
 gi.require_version('Gtk', '3.0')
 gi.require_version('Keybinder', '3.0')
@@ -35,10 +39,66 @@ class TranscriptionSegment:
     chunk_duration: float
     chunk_start_time: float
 
+class ServerConfig(NamedTuple):
+    """Configuration for the Whisper server connection."""
+    host: str
+    port: int
+
 class WhisperHotkeyApp:
     """Main application class for the Whisper Hotkey transcription tool."""
 
-    def __init__(self) -> None:
+    CONFIG_FILE = Path(__file__).parent / "whisper_config.json"
+    DEFAULT_PORT = 43007
+    
+    @classmethod
+    def load_config(cls) -> ServerConfig:
+        """Load server configuration from file or return default values."""
+        try:
+            if cls.CONFIG_FILE.exists():
+                with open(cls.CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+                    return ServerConfig(
+                        host=config.get('host', 'localhost'),
+                        port=config.get('port', cls.DEFAULT_PORT)
+                    )
+        except Exception as e:
+            logger.error(f"Error loading config: {e}")
+        
+        return ServerConfig('localhost', cls.DEFAULT_PORT)
+
+    @classmethod
+    def save_config(cls, host: str, port: int) -> None:
+        """Save server configuration to file."""
+        try:
+            with open(cls.CONFIG_FILE, 'w') as f:
+                json.dump({'host': host, 'port': port}, f)
+        except Exception as e:
+            logger.error(f"Error saving config: {e}")
+
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None) -> None:
+        """
+        Initialize the WhisperHotkey application.
+        
+        Args:
+            host: Optional server host address
+            port: Optional server port number
+        """
+        # Load config first
+        saved_config = self.load_config()
+        
+        # Use provided values or fall back to saved/default values
+        self.server_config = ServerConfig(
+            host=host or saved_config.host,
+            port=port or saved_config.port
+        )
+        
+        print(f'Using whisper host {self.server_config.host} on port {self.server_config.port}')
+
+        # Save new configuration if host was provided
+        if host:
+            self.save_config(self.server_config.host, self.server_config.port)
+        
+        # Initialize the rest of the application
         self._setup_window()
         self._init_variables()
         self._setup_keybinding()
@@ -195,7 +255,7 @@ class WhisperHotkeyApp:
     def _start_network_process(self) -> None:
         """Start the network connection to the transcription service."""
         self.nc_proc = subprocess.Popen(
-            ['nc', '192.168.0.197', '43007'],
+            ['nc', self.server_config.host, str(self.server_config.port)],
             stdin=self.audio_proc.stdout,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -256,9 +316,28 @@ class WhisperHotkeyApp:
         """Start the application main loop."""
         Gtk.main()
 
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Whisper Hotkey - Voice transcription tool'
+    )
+    parser.add_argument(
+        '--host',
+        help='Whisper server host address'
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=WhisperHotkeyApp.DEFAULT_PORT,
+        help=f'Whisper server port (default: {WhisperHotkeyApp.DEFAULT_PORT})'
+    )
+    return parser.parse_args()
+
 def main() -> None:
     """Application entry point."""
-    app = WhisperHotkeyApp()
+    args = parse_args()
+    app = WhisperHotkeyApp(host=args.host, port=args.port)
     app.run()
 
 if __name__ == "__main__":
