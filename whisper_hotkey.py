@@ -2,10 +2,9 @@
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Keybinder', '3.0')
-from gi.repository import Gtk, Gdk, GLib, Keybinder
+from gi.repository import Gtk, GLib, Keybinder
 import subprocess
 import threading
-import socket
 import signal
 import os
 import time
@@ -114,24 +113,31 @@ class WhisperHotkeyApp:
         return self.recording
 
     def read_output(self):
+        buffer = ""
         while self.recording and self.nc_proc:
             try:
                 line = self.nc_proc.stdout.readline().decode().strip()
                 if line:
-                    received_time = time.time() - self.recording_start_time
-                    print(f"Received line: {line}")
+                    print(f"\nRaw received line: {line}")  # Debug raw input
                     parts = line.split('  ', 1)
                     if len(parts) == 2:
                         timestamp, text = parts
+                        print(f"Parsed timestamp: {timestamp}, text: {text}")  # Debug parsing
                         # Parse the whisper timestamps (they're in milliseconds)
-                        start_ms, end_ms = map(int, timestamp.split())
-                        chunk_duration = (end_ms - start_ms) / 1000  # Convert to seconds
-                        chunk_start_time = start_ms / 1000  # When in the audio this chunk starts
-                        
-                        if timestamp not in self.seen_segments:
-                            self.seen_segments.add(timestamp)
-                            # Queue both text and timing info
-                            self.text_queue.put((text, received_time, chunk_duration, chunk_start_time))
+                        try:
+                            start_ms, end_ms = map(int, timestamp.split())
+                            chunk_duration = (end_ms - start_ms) / 1000  # Convert to seconds
+                            chunk_start_time = start_ms / 1000  # When in the audio this chunk starts
+                            
+                            if timestamp not in self.seen_segments:
+                                self.seen_segments.add(timestamp)
+                                received_time = time.time() - self.recording_start_time
+                                print(f"Queueing new segment: {text}")  # Debug queueing
+                                self.text_queue.put((text, received_time, chunk_duration, chunk_start_time))
+                            else:
+                                print(f"Skipping already seen segment: {timestamp}")  # Debug duplicates
+                        except Exception as e:
+                            print(f"Error parsing timestamp {timestamp}: {e}")  # Debug parsing errors
             except Exception as e:
                 print(f"Error reading output: {e}")
                 break
@@ -200,7 +206,7 @@ class WhisperHotkeyApp:
         else:
             self.recording = False
             self.cleanup_recording()
-            self.label.set_text("🎙️ Ready (Super+R)")
+            self.label.set_text("🎙️ Ready (Favorites key)")
 
     def run(self):
         Gtk.main()
