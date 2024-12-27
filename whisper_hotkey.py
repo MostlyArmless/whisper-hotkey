@@ -55,32 +55,61 @@ class WhisperHotkeyApp:
         return False
 
     def insert_text(self, text):
-        subprocess.run(['xdotool', 'type', text])
+        # Add small delay to make xdotool more reliable
+        print(f'Tryna insert the text "{text}"')
+        subprocess.run(['xdotool', 'sleep', '0.1', 'type', '--delay', '1', text])
 
     def receive_transcription(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            sock.connect(('192.168.0.197', 43007))
+            self.sock.connect(('192.168.0.197', 43007))
+            self.sock.settimeout(1.0)  # 1 second timeout
+            
             while self.recording:
-                data = sock.recv(1024)
-                if not data:
+                try:
+                    data = self.sock.recv(1024)
+                    if not data:
+                        break
+                    text = data.decode().strip()
+                    if text:
+                        # Filter out the timestamps from whisper output
+                        parts = text.split('  ')
+                        if len(parts) > 1:
+                            text = '  '.join(parts[1:])
+                        print(f'received text: "{text}"')
+                        GLib.idle_add(self.insert_text, text + " ")
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    print(f"Error receiving data: {e}")
                     break
-                text = data.decode().strip()
-                if text:
-                    GLib.idle_add(self.insert_text, text + " ")
         except Exception as e:
-            print(f"Error receiving transcription: {e}")
+            print(f"Error connecting: {e}")
             GLib.idle_add(self.label.set_text, "🚫 Connection Error")
         finally:
-            sock.close()
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+            except:
+                pass
+            self.sock.close()
 
     def toggle_recording(self, key=None):
         if not self.recording:
+            # Make sure previous threads are cleaned up
+            if hasattr(self, 'receive_thread') and self.receive_thread.is_alive():
+                self.receive_thread.join(timeout=1.0)
+            
             self.recording = True
             self.label.set_text("🎤 Recording... (Esc/Ctrl+Alt+R to stop)")
             
             cmd = "arecord -f S16_LE -c1 -r 16000 -t raw -D default | nc 192.168.0.197 43007"
-            self.proc = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+            try:
+                self.proc = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+            except Exception as e:
+                print(f"Error starting recording: {e}")
+                self.recording = False
+                self.label.set_text("🚫 Recording Error")
+                return
             
             self.receive_thread = threading.Thread(target=self.receive_transcription)
             self.receive_thread.daemon = True
@@ -88,7 +117,10 @@ class WhisperHotkeyApp:
         else:
             self.recording = False
             if self.proc:
-                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+                try:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+                except:
+                    pass
                 self.proc = None
             self.label.set_text("🎙️ Ready (Ctrl+Alt+R)")
 
