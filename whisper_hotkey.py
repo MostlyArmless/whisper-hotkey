@@ -31,8 +31,8 @@ class WhisperHotkeyApp:
         self.window.connect("draw", self.draw)
         
         self.recording = False
-        self.proc = None
-        self.sock = None
+        self.audio_proc = None
+        self.nc_proc = None
         
         Keybinder.init()
         Keybinder.bind("<Ctrl><Alt>R", self.toggle_recording)
@@ -48,115 +48,100 @@ class WhisperHotkeyApp:
         return False
 
     def type_text(self, text):
-        # Use xdotool to type text and immediately sync
+        print(f"Typing text: {text}")  # Debug print
         try:
             subprocess.run([
-                'xdotool', 'type', '--delay', '1', 
-                '--clearmodifiers', text
+                'xdotool', 'type', '--clearmodifiers', '--delay', '1', text
             ], check=True)
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error typing text: {e}")
             return False
 
-    def process_received_text(self, text):
-        # Filter timestamps and clean up text
-        parts = text.split('  ')
-        if len(parts) > 1:
-            clean_text = '  '.join(parts[1:]).strip()
-            if clean_text:
-                GLib.idle_add(self.type_text, clean_text + " ")
-
-    def receive_transcription(self):
+    def start_recording(self):
         try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect(('192.168.0.197', 43007))
-            self.sock.settimeout(0.5)  # shorter timeout for more responsive stopping
-
-            buffer = ""
-            while self.recording:
-                try:
-                    data = self.sock.recv(1024)
-                    if not data:
-                        break
-                        
-                    buffer += data.decode()
-                    lines = buffer.split('\n')
-                    
-                    # Process all complete lines
-                    for line in lines[:-1]:
-                        if line.strip():
-                            self.process_received_text(line)
-                    
-                    # Keep the incomplete last line
-                    buffer = lines[-1]
-                    
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    print(f"Error receiving data: {e}")
-                    break
-                    
-            # Process any remaining data
-            if buffer.strip():
-                self.process_received_text(buffer)
-                
+            # Start arecord in its own process
+            self.audio_proc = subprocess.Popen(
+                ['arecord', '-f', 'S16_LE', '-c1', '-r', '16000', '-t', 'raw', '-D', 'default'],
+                stdout=subprocess.PIPE,
+                preexec_fn=os.setsid
+            )
+            
+            # Start netcat in its own process, connected to arecord's output
+            self.nc_proc = subprocess.Popen(
+                ['nc', '192.168.0.197', '43007'],
+                stdin=self.audio_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid
+            )
+            
+            # Close the pipe in the parent process
+            self.audio_proc.stdout.close()
+            
+            # Start thread to read netcat's output
+            self.read_thread = threading.Thread(target=self.read_output)
+            self.read_thread.daemon = True
+            self.read_thread.start()
+            
+            return True
+            
         except Exception as e:
-            print(f"Connection error: {e}")
-            GLib.idle_add(self.label.set_text, "🚫 Connection Error")
-        finally:
-            self.cleanup_connection()
+            print(f"Error starting recording: {e}")
+            self.cleanup_recording()
+            return False
 
-    def cleanup_connection(self):
-        if self.sock:
+    def read_output(self):
+        while self.recording and self.nc_proc:
             try:
-                self.sock.shutdown(socket.SHUT_RDWR)
+                # Read one line at a time from netcat's output
+                line = self.nc_proc.stdout.readline().decode().strip()
+                if line:
+                    print(f"Received line: {line}")  # Debug print
+                    # Filter out timestamps if present
+                    parts = line.split('  ')
+                    if len(parts) > 1:
+                        text = '  '.join(parts[1:])
+                    else:
+                        text = line
+                    GLib.idle_add(self.type_text, text + " ")
+            except Exception as e:
+                print(f"Error reading output: {e}")
+                break
+
+    def cleanup_recording(self):
+        if self.audio_proc:
+            try:
+                os.killpg(os.getpgid(self.audio_proc.pid), signal.SIGTERM)
             except:
                 pass
+            self.audio_proc = None
+            
+        if self.nc_proc:
             try:
-                self.sock.close()
+                os.killpg(os.getpgid(self.nc_proc.pid), signal.SIGTERM)
             except:
                 pass
-            self.sock = None
-        
-        if self.proc:
-            try:
-                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-            except:
-                pass
-            self.proc = None
+            self.nc_proc = None
 
     def cleanup_and_quit(self, *args):
         self.recording = False
-        self.cleanup_connection()
+        self.cleanup_recording()
         Gtk.main_quit()
         return False
 
     def toggle_recording(self, key=None):
         if not self.recording:
-            # Start new recording
             self.recording = True
-            self.label.set_text("🎤 Recording... (Esc/Ctrl+Alt+R to stop)")
-            
-            cmd = "arecord -f S16_LE -c1 -r 16000 -t raw -D default | nc 192.168.0.197 43007"
-            try:
-                self.proc = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
-            except Exception as e:
-                print(f"Error starting recording: {e}")
+            if self.start_recording():
+                self.label.set_text("🎤 Recording... (Esc/Ctrl+Alt+R to stop)")
+            else:
                 self.recording = False
                 self.label.set_text("🚫 Recording Error")
-                return
-            
-            self.receive_thread = threading.Thread(target=self.receive_transcription)
-            self.receive_thread.daemon = True
-            self.receive_thread.start()
         else:
-            # Stop recording
             self.recording = False
-            self.cleanup_connection()
+            self.cleanup_recording()
             self.label.set_text("🎙️ Ready (Ctrl+Alt+R)")
-            # Small delay to ensure the socket is properly closed
-            time.sleep(0.1)
 
     def run(self):
         self.window.connect('key-press-event', self.on_key_press)
