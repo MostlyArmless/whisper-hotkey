@@ -92,19 +92,22 @@ class WhisperHotkeyApp:
             return False
 
     def read_output(self):
+        seen_segments = set()  # Track segments we've already typed
         while self.recording and self.nc_proc:
             try:
-                # Read one line at a time from netcat's output
                 line = self.nc_proc.stdout.readline().decode().strip()
                 if line:
                     print(f"Received line: {line}")  # Debug print
-                    # Filter out timestamps if present
+                    # Extract timestamp and text
                     parts = line.split('  ')
                     if len(parts) > 1:
+                        timestamp = parts[0]  # e.g., "0 720" or "720 1340"
                         text = '  '.join(parts[1:])
-                    else:
-                        text = line
-                    GLib.idle_add(self.type_text, text + " ")
+                        
+                        # Only type text for segments we haven't seen
+                        if timestamp not in seen_segments:
+                            seen_segments.add(timestamp)
+                            GLib.idle_add(self.type_text, text + " ")
             except Exception as e:
                 print(f"Error reading output: {e}")
                 break
