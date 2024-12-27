@@ -13,6 +13,12 @@ from pathlib import Path
 
 class WhisperHotkeyApp:
     def __init__(self):
+        self.hotkey = "<Ctrl><Alt>R"
+        self.labels = {
+            'recording_error': "🚫 Recording Error",
+            'recording': f"🔴 Recording (Press {self.hotkey} to stop)",
+            'ready': f"🎙️ Ready (Press {self.hotkey} to start)"
+        }
         self.window = Gtk.Window(title="Whisper Hotkey")
         self.window.set_keep_above(True)
         self.window.set_decorated(True)
@@ -29,8 +35,12 @@ class WhisperHotkeyApp:
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         outer_box.pack_start(self.box, True, True, 0)
         
-        self.label = Gtk.Label(label="🎙️ Ready (Favorites key)")
+        self.label = Gtk.Label(label=self.labels['ready'])
         self.box.pack_start(self.label, True, True, 0)
+        
+        self.button = Gtk.Button(label="Toggle Recording")
+        self.button.connect("clicked", self.toggle_recording)
+        self.box.pack_start(self.button, True, True, 0)
         
         screen = self.window.get_screen()
         visual = screen.get_rgba_visual()
@@ -48,7 +58,7 @@ class WhisperHotkeyApp:
         self.transcript_path = Path.home() / "whisper-transcript.txt"
         
         Keybinder.init()
-        Keybinder.bind("XF86Favorites", self.toggle_recording)
+        Keybinder.bind(self.hotkey, self.toggle_recording)
         
         self.window.connect("delete-event", self.cleanup_and_quit)
         self.window.show_all()
@@ -131,7 +141,6 @@ class WhisperHotkeyApp:
 
             self.audio_proc.stdout.close()
             
-            # print(f'read_thread before {self.read_thread}')
             self.read_thread = threading.Thread(target=self.read_output)
             print(f'read_thread after (about to start) {self.read_thread}')
             self.read_thread.daemon = True
@@ -162,11 +171,11 @@ class WhisperHotkeyApp:
                 os.killpg(os.getpgid(self.nc_proc.pid), signal.SIGTERM)
                 print(f'Killed nc_proc {self.nc_proc.pid}')
             except Exception as e:
-                print(f'ERROR while trying to kill nc_proc {self.nc_proc.pid}...')
+                print(f'ERROR while trying to kill nc_proc {self.nc_proc.pid}: {e}')
                 pass
             self.nc_proc = None
 
-        print(f'Finished cleanup_recording. audio_proc = {self.audio_proc}, nc_proc = {self.audio_proc}')
+        print(f'Finished cleanup_recording. audio_proc = {self.audio_proc}, nc_proc = {self.nc_proc}')
 
     def cleanup_and_quit(self, *args):
         self.is_recording = False
@@ -182,22 +191,19 @@ class WhisperHotkeyApp:
             self.is_recording = True
             self.seen_segments.clear()
             if self.start_recording():
-                self.label.set_text("🎤 Recording... (Favorites key to stop)")
+                self.label.set_text(self.labels['recording'])
                 GLib.timeout_add(100, self.process_text_queue)
             else:
                 self.is_recording = False
-                self.label.set_text("🚫 Recording Error")
+                self.label.set_text(self.labels['recording_error'])
         else:
             self.is_recording = False
             self.cleanup_recording()
-            self.label.set_text("🎙️ Ready (Favorites key)")
+            self.label.set_text(self.labels['ready'])
 
     def run(self):
         Gtk.main()
 
-def main():
+if __name__ == "__main__":
     app = WhisperHotkeyApp()
     app.run()
-
-if __name__ == "__main__":
-    main()
