@@ -15,20 +15,17 @@ class WhisperHotkeyApp:
     def __init__(self):
         self.window = Gtk.Window(title="Whisper Hotkey")
         self.window.set_keep_above(True)
-        self.window.set_decorated(True)  # Enable window decorations for close button
+        self.window.set_decorated(True)
         self.window.set_default_size(150, 40)
         
-        # Create outer box for window decorations
         outer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.window.add(outer_box)
         
-        # Create header bar with close button
         header = Gtk.HeaderBar()
         header.set_decoration_layout("close:")
         header.set_show_close_button(True)
         self.window.set_titlebar(header)
         
-        # Main content box
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         outer_box.pack_start(self.box, True, True, 0)
         
@@ -47,18 +44,14 @@ class WhisperHotkeyApp:
         self.nc_proc = None
         self.text_queue = queue.Queue()
         self.seen_segments = set()
-        self.recording_start_time = None  # Track when recording starts
-        
-        # Create transcript file path
+        self.recording_start_time = None
         self.transcript_path = Path.home() / "whisper-transcript.txt"
         
         Keybinder.init()
         Keybinder.bind("XF86Favorites", self.toggle_recording)
-        print("Hotkey bound: Favorites key")
         
         self.window.connect("delete-event", self.cleanup_and_quit)
         self.window.show_all()
-
         GLib.timeout_add(100, self.process_text_queue)
 
     def draw(self, widget, context):
@@ -68,7 +61,6 @@ class WhisperHotkeyApp:
         return False
 
     def append_to_transcript(self, text):
-        """Append text to transcript file with timestamp"""
         try:
             timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
             with open(self.transcript_path, 'a', encoding='utf-8') as f:
@@ -77,12 +69,10 @@ class WhisperHotkeyApp:
             print(f"Error writing to transcript: {e}")
 
     def type_text(self, text):
-        print(f"Typing text: {text}")
         try:
             subprocess.run([
                 'xdotool', 'type', '--clearmodifiers', '--delay', '1', text
             ], check=True)
-            # Also append to transcript file
             self.append_to_transcript(text.strip())
             return True
         except subprocess.CalledProcessError as e:
@@ -94,50 +84,28 @@ class WhisperHotkeyApp:
             while True:
                 text, received_time, chunk_duration, chunk_start_time = self.text_queue.get_nowait()
                 typed_time = time.time() - self.recording_start_time
-                
-                # Calculate latencies
-                processing_latency = received_time - chunk_start_time  # Time from audio capture to server response
-                total_latency = typed_time - chunk_start_time  # Total time from audio to typed output
-                
                 self.type_text(text + " ")
-                
-                print(f"\nLatency Analysis:")
-                print(f"Chunk duration: {chunk_duration:.2f}s")
-                print(f"Processing latency: {processing_latency:.2f}s")
-                print(f"Total latency: {total_latency:.2f}s")
-                print(f"Realtime factor: {chunk_duration/processing_latency:.2f}x")
-                
                 self.text_queue.task_done()
         except queue.Empty:
             pass
         return self.recording
 
     def read_output(self):
-        buffer = ""
         while self.recording and self.nc_proc:
             try:
                 line = self.nc_proc.stdout.readline().decode().strip()
                 if line:
-                    print(f"\nRaw received line: {line}")  # Debug raw input
                     parts = line.split('  ', 1)
                     if len(parts) == 2:
                         timestamp, text = parts
-                        print(f"Parsed timestamp: {timestamp}, text: {text}")  # Debug parsing
-                        # Parse the whisper timestamps (they're in milliseconds)
-                        try:
-                            start_ms, end_ms = map(int, timestamp.split())
-                            chunk_duration = (end_ms - start_ms) / 1000  # Convert to seconds
-                            chunk_start_time = start_ms / 1000  # When in the audio this chunk starts
-                            
-                            if timestamp not in self.seen_segments:
-                                self.seen_segments.add(timestamp)
-                                received_time = time.time() - self.recording_start_time
-                                print(f"Queueing new segment: {text}")  # Debug queueing
-                                self.text_queue.put((text, received_time, chunk_duration, chunk_start_time))
-                            else:
-                                print(f"Skipping already seen segment: {timestamp}")  # Debug duplicates
-                        except Exception as e:
-                            print(f"Error parsing timestamp {timestamp}: {e}")  # Debug parsing errors
+                        start_ms, end_ms = map(int, timestamp.split())
+                        chunk_duration = (end_ms - start_ms) / 1000
+                        chunk_start_time = start_ms / 1000
+                        
+                        if timestamp not in self.seen_segments:
+                            self.seen_segments.add(timestamp)
+                            received_time = time.time() - self.recording_start_time
+                            self.text_queue.put((text, received_time, chunk_duration, chunk_start_time))
             except Exception as e:
                 print(f"Error reading output: {e}")
                 break
