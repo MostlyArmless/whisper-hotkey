@@ -103,6 +103,7 @@ class WhisperHotkeyApp:
         self._init_variables()
         self._setup_keybinding()
         self._setup_periodic_tasks()
+        self.stop_event = threading.Event()
 
     def _setup_window(self) -> None:
         """Initialize and configure the GTK window and its widgets."""
@@ -199,11 +200,15 @@ class WhisperHotkeyApp:
 
     def read_output(self) -> None:
         """Read and process output from the transcription service."""
-        while self.recording and self.nc_proc:
+        while not self.stop_event.is_set() and self.nc_proc:
             try:
-                line = self.nc_proc.stdout.readline().decode().strip()
-                if line:
-                    self._process_transcription_line(line)
+                # Add timeout to read to make it more responsive
+                if self.nc_proc.stdout.readable():
+                    line = self.nc_proc.stdout.readline().decode().strip()
+                    if line:
+                        self._process_transcription_line(line)
+                else:
+                    time.sleep(0.1)  # Short sleep to prevent CPU spinning
             except Exception as e:
                 logger.error(f"Error reading output: {e}")
                 break
@@ -265,12 +270,20 @@ class WhisperHotkeyApp:
 
     def _start_reading_thread(self) -> None:
         """Start the thread for reading transcription output."""
+        self.stop_event.clear()  # Reset the stop event
         self.read_thread = threading.Thread(target=self.read_output)
         self.read_thread.daemon = True
         self.read_thread.start()
 
     def cleanup_recording(self) -> None:
         """Clean up recording processes."""
+        # Signal the read thread to stop
+        self.stop_event.set()
+        
+        # Wait for read thread to finish with timeout
+        if hasattr(self, 'read_thread') and self.read_thread.is_alive():
+            self.read_thread.join(timeout=1.0)
+            
         for proc_name, proc in [("audio", self.audio_proc), ("network", self.nc_proc)]:
             if proc:
                 try:
