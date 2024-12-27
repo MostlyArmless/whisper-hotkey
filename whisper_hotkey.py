@@ -39,7 +39,7 @@ class WhisperHotkeyApp:
         self.window.set_app_paintable(True)
         self.window.connect("draw", self.draw)
         
-        self.recording = False
+        self.is_recording = False
         self.audio_proc = None
         self.nc_proc = None
         self.text_queue = queue.Queue()
@@ -88,10 +88,10 @@ class WhisperHotkeyApp:
                 self.text_queue.task_done()
         except queue.Empty:
             pass
-        return self.recording
+        return self.is_recording
 
     def read_output(self):
-        while self.recording and self.nc_proc:
+        while self.is_recording and self.nc_proc:
             try:
                 line = self.nc_proc.stdout.readline().decode().strip()
                 if line:
@@ -118,6 +118,7 @@ class WhisperHotkeyApp:
                 stdout=subprocess.PIPE,
                 preexec_fn=os.setsid
             )
+            print(self.audio_proc)
             
             self.nc_proc = subprocess.Popen(
                 ['nc', '192.168.0.197', '43007'],
@@ -126,12 +127,16 @@ class WhisperHotkeyApp:
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid
             )
-            
+            print(self.nc_proc)
+
             self.audio_proc.stdout.close()
             
+            # print(f'read_thread before {self.read_thread}')
             self.read_thread = threading.Thread(target=self.read_output)
+            print(f'read_thread after (about to start) {self.read_thread}')
             self.read_thread.daemon = True
             self.read_thread.start()
+            print(f'read_thread started now {self.read_thread}')
             
             return True
             
@@ -143,36 +148,47 @@ class WhisperHotkeyApp:
     def cleanup_recording(self):
         if self.audio_proc:
             try:
+                print(f'Attempting to kill audio_proc {self.audio_proc.pid}...')
                 os.killpg(os.getpgid(self.audio_proc.pid), signal.SIGTERM)
-            except:
+                print(f'Killed audio_proc {self.audio_proc.pid}')
+            except Exception as e:
+                print(f'ERROR while trying to kill audio_proc {self.audio_proc.pid}: {e}')
                 pass
             self.audio_proc = None
             
         if self.nc_proc:
             try:
+                print(f'Attempting to kill nc_proc {self.nc_proc.pid}...')
                 os.killpg(os.getpgid(self.nc_proc.pid), signal.SIGTERM)
-            except:
+                print(f'Killed nc_proc {self.nc_proc.pid}')
+            except Exception as e:
+                print(f'ERROR while trying to kill nc_proc {self.nc_proc.pid}...')
                 pass
             self.nc_proc = None
 
+        print(f'Finished cleanup_recording. audio_proc = {self.audio_proc}, nc_proc = {self.audio_proc}')
+
     def cleanup_and_quit(self, *args):
-        self.recording = False
+        self.is_recording = False
         self.cleanup_recording()
         Gtk.main_quit()
         return False
 
     def toggle_recording(self, key=None):
-        if not self.recording:
-            self.recording = True
+        # Print the current time
+        print(f'toggle_recording at {time.strftime("%Y-%m-%d %H:%M:%S")}')
+        if not self.is_recording:
+            # Start recording
+            self.is_recording = True
             self.seen_segments.clear()
             if self.start_recording():
                 self.label.set_text("🎤 Recording... (Favorites key to stop)")
                 GLib.timeout_add(100, self.process_text_queue)
             else:
-                self.recording = False
+                self.is_recording = False
                 self.label.set_text("🚫 Recording Error")
         else:
-            self.recording = False
+            self.is_recording = False
             self.cleanup_recording()
             self.label.set_text("🎙️ Ready (Favorites key)")
 
