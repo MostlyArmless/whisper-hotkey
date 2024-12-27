@@ -9,6 +9,7 @@ import socket
 import signal
 import os
 import time
+import queue
 
 class WhisperHotkeyApp:
     def __init__(self):
@@ -33,6 +34,8 @@ class WhisperHotkeyApp:
         self.recording = False
         self.audio_proc = None
         self.nc_proc = None
+        self.text_queue = queue.Queue()
+        self.seen_segments = set()
         
         Keybinder.init()
         Keybinder.bind("<Ctrl><Alt>R", self.toggle_recording)
@@ -41,6 +44,9 @@ class WhisperHotkeyApp:
         self.window.connect("delete-event", self.cleanup_and_quit)
         self.window.show_all()
 
+        # Start the text processing timer
+        GLib.timeout_add(100, self.process_text_queue)
+
     def draw(self, widget, context):
         context.set_source_rgba(0, 0, 0, 0.8)
         context.set_operator(1)
@@ -48,7 +54,7 @@ class WhisperHotkeyApp:
         return False
 
     def type_text(self, text):
-        print(f"Typing text: {text}")  # Debug print
+        print(f"Typing text: {text}")
         try:
             subprocess.run([
                 'xdotool', 'type', '--clearmodifiers', '--delay', '1', text
@@ -58,16 +64,44 @@ class WhisperHotkeyApp:
             print(f"Error typing text: {e}")
             return False
 
+    def process_text_queue(self):
+        """Process any pending text in the queue"""
+        try:
+            while True:  # Process all available items
+                text = self.text_queue.get_nowait()
+                self.type_text(text)
+                self.text_queue.task_done()
+        except queue.Empty:
+            pass
+        
+        # Keep the timer running if we're recording
+        return self.recording
+
+    def read_output(self):
+        while self.recording and self.nc_proc:
+            try:
+                line = self.nc_proc.stdout.readline().decode().strip()
+                if line:
+                    print(f"Received line: {line}")
+                    parts = line.split('  ', 1)  # Split only on first occurrence
+                    if len(parts) == 2:
+                        timestamp, text = parts
+                        if timestamp not in self.seen_segments:
+                            self.seen_segments.add(timestamp)
+                            # Add to queue instead of direct typing
+                            self.text_queue.put(text + " ")
+            except Exception as e:
+                print(f"Error reading output: {e}")
+                break
+
     def start_recording(self):
         try:
-            # Start arecord in its own process
             self.audio_proc = subprocess.Popen(
                 ['arecord', '-f', 'S16_LE', '-c1', '-r', '16000', '-t', 'raw', '-D', 'default'],
                 stdout=subprocess.PIPE,
                 preexec_fn=os.setsid
             )
             
-            # Start netcat in its own process, connected to arecord's output
             self.nc_proc = subprocess.Popen(
                 ['nc', '192.168.0.197', '43007'],
                 stdin=self.audio_proc.stdout,
@@ -76,10 +110,8 @@ class WhisperHotkeyApp:
                 preexec_fn=os.setsid
             )
             
-            # Close the pipe in the parent process
             self.audio_proc.stdout.close()
             
-            # Start thread to read netcat's output
             self.read_thread = threading.Thread(target=self.read_output)
             self.read_thread.daemon = True
             self.read_thread.start()
@@ -90,27 +122,6 @@ class WhisperHotkeyApp:
             print(f"Error starting recording: {e}")
             self.cleanup_recording()
             return False
-
-    def read_output(self):
-        seen_segments = set()  # Track segments we've already typed
-        while self.recording and self.nc_proc:
-            try:
-                line = self.nc_proc.stdout.readline().decode().strip()
-                if line:
-                    print(f"Received line: {line}")  # Debug print
-                    # Extract timestamp and text
-                    parts = line.split('  ')
-                    if len(parts) > 1:
-                        timestamp = parts[0]  # e.g., "0 720" or "720 1340"
-                        text = '  '.join(parts[1:])
-                        
-                        # Only type text for segments we haven't seen
-                        if timestamp not in seen_segments:
-                            seen_segments.add(timestamp)
-                            GLib.idle_add(self.type_text, text + " ")
-            except Exception as e:
-                print(f"Error reading output: {e}")
-                break
 
     def cleanup_recording(self):
         if self.audio_proc:
@@ -136,8 +147,11 @@ class WhisperHotkeyApp:
     def toggle_recording(self, key=None):
         if not self.recording:
             self.recording = True
+            self.seen_segments.clear()  # Clear segments for new recording
             if self.start_recording():
                 self.label.set_text("🎤 Recording... (Esc/Ctrl+Alt+R to stop)")
+                # Start the text processing timer
+                GLib.timeout_add(100, self.process_text_queue)
             else:
                 self.recording = False
                 self.label.set_text("🚫 Recording Error")
