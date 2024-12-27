@@ -33,7 +33,7 @@ class WhisperHotkeyApp:
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         outer_box.pack_start(self.box, True, True, 0)
         
-        self.label = Gtk.Label(label="🎙️ Ready (Super+R)")
+        self.label = Gtk.Label(label="🎙️ Ready (Favorites key)")
         self.box.pack_start(self.label, True, True, 0)
         
         screen = self.window.get_screen()
@@ -53,9 +53,8 @@ class WhisperHotkeyApp:
         self.transcript_path = Path.home() / "whisper-transcript.txt"
         
         Keybinder.init()
-        # Super/Windows key binding can vary, try mod4-r
-        Keybinder.bind("XF86Favorites", self.toggle_recording)  # Windows/Super key + R
-        print("Hotkey bound: Favorites (Star) button")
+        Keybinder.bind("XF86Favorites", self.toggle_recording)
+        print("Hotkey bound: Favorites key")
         
         self.window.connect("delete-event", self.cleanup_and_quit)
         self.window.show_all()
@@ -69,10 +68,11 @@ class WhisperHotkeyApp:
         return False
 
     def append_to_transcript(self, text):
-        """Append text to transcript file"""
+        """Append text to transcript file with timestamp"""
         try:
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
             with open(self.transcript_path, 'a', encoding='utf-8') as f:
-                f.write(text + '\n')
+                f.write(f"{timestamp} - {text}\n")
         except Exception as e:
             print(f"Error writing to transcript: {e}")
 
@@ -170,7 +170,7 @@ class WhisperHotkeyApp:
             self.recording = True
             self.seen_segments.clear()
             if self.start_recording():
-                self.label.set_text("🎤 Recording... (Super+R to stop)")
+                self.label.set_text("🎤 Recording... (Favorites key to stop)")
                 GLib.timeout_add(100, self.process_text_queue)
             else:
                 self.recording = False
