@@ -10,18 +10,30 @@ import signal
 import os
 import time
 import queue
+from pathlib import Path
 
 class WhisperHotkeyApp:
     def __init__(self):
         self.window = Gtk.Window(title="Whisper Hotkey")
         self.window.set_keep_above(True)
-        self.window.set_decorated(False)
+        self.window.set_decorated(True)  # Enable window decorations for close button
         self.window.set_default_size(150, 40)
         
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.window.add(self.box)
+        # Create outer box for window decorations
+        outer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.window.add(outer_box)
         
-        self.label = Gtk.Label(label="🎙️ Ready (Ctrl+Alt+R)")
+        # Create header bar with close button
+        header = Gtk.HeaderBar()
+        header.set_decoration_layout("close:")
+        header.set_show_close_button(True)
+        self.window.set_titlebar(header)
+        
+        # Main content box
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        outer_box.pack_start(self.box, True, True, 0)
+        
+        self.label = Gtk.Label(label="🎙️ Ready (Super+R)")
         self.box.pack_start(self.label, True, True, 0)
         
         screen = self.window.get_screen()
@@ -37,14 +49,17 @@ class WhisperHotkeyApp:
         self.text_queue = queue.Queue()
         self.seen_segments = set()
         
+        # Create transcript file path
+        self.transcript_path = Path.home() / "whisper-transcript.txt"
+        
         Keybinder.init()
-        Keybinder.bind("<Ctrl><Alt>R", self.toggle_recording)
-        print("Hotkey bound: Ctrl+Alt+R")
+        # Super/Windows key binding can vary, try mod4-r
+        Keybinder.bind("XF86Favorites", self.toggle_recording)  # Windows/Super key + R
+        print("Hotkey bound: Favorites (Star) button")
         
         self.window.connect("delete-event", self.cleanup_and_quit)
         self.window.show_all()
 
-        # Start the text processing timer
         GLib.timeout_add(100, self.process_text_queue)
 
     def draw(self, widget, context):
@@ -53,28 +68,35 @@ class WhisperHotkeyApp:
         context.paint()
         return False
 
+    def append_to_transcript(self, text):
+        """Append text to transcript file"""
+        try:
+            with open(self.transcript_path, 'a', encoding='utf-8') as f:
+                f.write(text + '\n')
+        except Exception as e:
+            print(f"Error writing to transcript: {e}")
+
     def type_text(self, text):
         print(f"Typing text: {text}")
         try:
             subprocess.run([
                 'xdotool', 'type', '--clearmodifiers', '--delay', '1', text
             ], check=True)
+            # Also append to transcript file
+            self.append_to_transcript(text.strip())
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error typing text: {e}")
             return False
 
     def process_text_queue(self):
-        """Process any pending text in the queue"""
         try:
-            while True:  # Process all available items
+            while True:
                 text = self.text_queue.get_nowait()
                 self.type_text(text)
                 self.text_queue.task_done()
         except queue.Empty:
             pass
-        
-        # Keep the timer running if we're recording
         return self.recording
 
     def read_output(self):
@@ -83,12 +105,11 @@ class WhisperHotkeyApp:
                 line = self.nc_proc.stdout.readline().decode().strip()
                 if line:
                     print(f"Received line: {line}")
-                    parts = line.split('  ', 1)  # Split only on first occurrence
+                    parts = line.split('  ', 1)
                     if len(parts) == 2:
                         timestamp, text = parts
                         if timestamp not in self.seen_segments:
                             self.seen_segments.add(timestamp)
-                            # Add to queue instead of direct typing
                             self.text_queue.put(text + " ")
             except Exception as e:
                 print(f"Error reading output: {e}")
@@ -147,10 +168,9 @@ class WhisperHotkeyApp:
     def toggle_recording(self, key=None):
         if not self.recording:
             self.recording = True
-            self.seen_segments.clear()  # Clear segments for new recording
+            self.seen_segments.clear()
             if self.start_recording():
-                self.label.set_text("🎤 Recording... (Esc/Ctrl+Alt+R to stop)")
-                # Start the text processing timer
+                self.label.set_text("🎤 Recording... (Super+R to stop)")
                 GLib.timeout_add(100, self.process_text_queue)
             else:
                 self.recording = False
@@ -158,16 +178,10 @@ class WhisperHotkeyApp:
         else:
             self.recording = False
             self.cleanup_recording()
-            self.label.set_text("🎙️ Ready (Ctrl+Alt+R)")
+            self.label.set_text("🎙️ Ready (Super+R)")
 
     def run(self):
-        self.window.connect('key-press-event', self.on_key_press)
         Gtk.main()
-
-    def on_key_press(self, widget, event):
-        if event.keyval == Gdk.KEY_Escape and self.recording:
-            self.toggle_recording()
-        return True
 
 def main():
     app = WhisperHotkeyApp()
