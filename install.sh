@@ -42,9 +42,11 @@ SCRIPT="$INSTALL_DIR/whisper_hotkey.py"
 
 # Ensure virtual environment exists
 if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
+    # Create venv without pip to ensure we use system-wide packages
+    python3 -m venv "$VENV_DIR" --system-site-packages
     source "$VENV_DIR/bin/activate"
-    pip install -r "$INSTALL_DIR/requirements.txt"
+    # Install dependencies while allowing system-wide access
+    pip install --ignore-installed -r "$INSTALL_DIR/requirements.txt"
 else
     source "$VENV_DIR/bin/activate"
 fi
