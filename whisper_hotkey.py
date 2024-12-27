@@ -8,6 +8,7 @@ import threading
 import socket
 import signal
 import os
+import time
 
 class WhisperHotkeyApp:
     def __init__(self):
@@ -16,15 +17,12 @@ class WhisperHotkeyApp:
         self.window.set_decorated(False)
         self.window.set_default_size(150, 40)
         
-        # Use a box for layout
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.window.add(self.box)
         
-        # Status label
         self.label = Gtk.Label(label="🎙️ Ready (Ctrl+Alt+R)")
         self.box.pack_start(self.label, True, True, 0)
         
-        # Make window semi-transparent
         screen = self.window.get_screen()
         visual = screen.get_rgba_visual()
         if visual and screen.is_composited():
@@ -32,21 +30,16 @@ class WhisperHotkeyApp:
         self.window.set_app_paintable(True)
         self.window.connect("draw", self.draw)
         
-        # Initialize state
         self.recording = False
         self.proc = None
+        self.sock = None
         
-        # Bind hotkeys
         Keybinder.init()
         Keybinder.bind("<Ctrl><Alt>R", self.toggle_recording)
         print("Hotkey bound: Ctrl+Alt+R")
         
-        # Handle window close
-        self.window.connect("delete-event", Gtk.main_quit)
-        
-        # Show window initially
+        self.window.connect("delete-event", self.cleanup_and_quit)
         self.window.show_all()
-        print("Window should be visible now")
 
     def draw(self, widget, context):
         context.set_source_rgba(0, 0, 0, 0.8)
@@ -54,51 +47,94 @@ class WhisperHotkeyApp:
         context.paint()
         return False
 
-    def insert_text(self, text):
-        # Add small delay to make xdotool more reliable
-        print(f'Tryna insert the text "{text}"')
-        subprocess.run(['xdotool', 'sleep', '0.1', 'type', '--delay', '1', text])
+    def type_text(self, text):
+        # Use xdotool to type text and immediately sync
+        try:
+            subprocess.run([
+                'xdotool', 'type', '--delay', '1', 
+                '--clearmodifiers', text
+            ], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error typing text: {e}")
+            return False
+
+    def process_received_text(self, text):
+        # Filter timestamps and clean up text
+        parts = text.split('  ')
+        if len(parts) > 1:
+            clean_text = '  '.join(parts[1:]).strip()
+            if clean_text:
+                GLib.idle_add(self.type_text, clean_text + " ")
 
     def receive_transcription(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect(('192.168.0.197', 43007))
-            self.sock.settimeout(1.0)  # 1 second timeout
-            
+            self.sock.settimeout(0.5)  # shorter timeout for more responsive stopping
+
+            buffer = ""
             while self.recording:
                 try:
                     data = self.sock.recv(1024)
                     if not data:
                         break
-                    text = data.decode().strip()
-                    if text:
-                        # Filter out the timestamps from whisper output
-                        parts = text.split('  ')
-                        if len(parts) > 1:
-                            text = '  '.join(parts[1:])
-                        print(f'received text: "{text}"')
-                        GLib.idle_add(self.insert_text, text + " ")
+                        
+                    buffer += data.decode()
+                    lines = buffer.split('\n')
+                    
+                    # Process all complete lines
+                    for line in lines[:-1]:
+                        if line.strip():
+                            self.process_received_text(line)
+                    
+                    # Keep the incomplete last line
+                    buffer = lines[-1]
+                    
                 except socket.timeout:
                     continue
                 except Exception as e:
                     print(f"Error receiving data: {e}")
                     break
+                    
+            # Process any remaining data
+            if buffer.strip():
+                self.process_received_text(buffer)
+                
         except Exception as e:
-            print(f"Error connecting: {e}")
+            print(f"Connection error: {e}")
             GLib.idle_add(self.label.set_text, "🚫 Connection Error")
         finally:
+            self.cleanup_connection()
+
+    def cleanup_connection(self):
+        if self.sock:
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)
             except:
                 pass
-            self.sock.close()
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.sock = None
+        
+        if self.proc:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+            except:
+                pass
+            self.proc = None
+
+    def cleanup_and_quit(self, *args):
+        self.recording = False
+        self.cleanup_connection()
+        Gtk.main_quit()
+        return False
 
     def toggle_recording(self, key=None):
         if not self.recording:
-            # Make sure previous threads are cleaned up
-            if hasattr(self, 'receive_thread') and self.receive_thread.is_alive():
-                self.receive_thread.join(timeout=1.0)
-            
+            # Start new recording
             self.recording = True
             self.label.set_text("🎤 Recording... (Esc/Ctrl+Alt+R to stop)")
             
@@ -115,14 +151,12 @@ class WhisperHotkeyApp:
             self.receive_thread.daemon = True
             self.receive_thread.start()
         else:
+            # Stop recording
             self.recording = False
-            if self.proc:
-                try:
-                    os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-                except:
-                    pass
-                self.proc = None
+            self.cleanup_connection()
             self.label.set_text("🎙️ Ready (Ctrl+Alt+R)")
+            # Small delay to ensure the socket is properly closed
+            time.sleep(0.1)
 
     def run(self):
         self.window.connect('key-press-event', self.on_key_press)
