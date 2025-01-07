@@ -12,6 +12,41 @@ import time
 import queue
 from pathlib import Path
 from subprocess import check_output
+import configparser
+
+def load_config():
+    config = configparser.ConfigParser()
+    
+    # Default values
+    config['server'] = {
+        'host': 'localhost',
+        'port': '43007'
+    }
+    config['hotkey'] = {
+        'combination': '<Ctrl><Alt>R'
+    }
+    config['recording'] = {
+        'max_duration': '60'
+    }
+    
+    # Config file location
+    config_dir = Path.home() / '.config' / 'whisper-client'
+    config_file = config_dir / 'config.ini'
+    
+    # Create config directory if it doesn't exist
+    config_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Read existing config or create default
+    if config_file.exists():
+        config.read(config_file)
+    else:
+        with open(config_file, 'w') as f:
+            config.write(f)
+    
+    return config
+
+# Load config at startup
+config = load_config()
 
 def get_display():
     try:
@@ -25,7 +60,7 @@ get_display()
 class WhisperIndicatorApp:
     def __init__(self):
         Gtk.init(None)
-        self.hotkey = "<Ctrl><Alt>R"
+        self.hotkey = config['hotkey']['combination']
         self.labels = {
             'recording_error': "🚫 Recording Error",
             'recording': f"🔴 Recording (Press {self.hotkey} to stop)",
@@ -72,7 +107,7 @@ class WhisperIndicatorApp:
         self.seen_segments = set()
         self.recording_start_time = None
         self.recording_duration = 0
-        self.MAX_RECORDING_DURATION = 60  # 60 seconds
+        self.MAX_RECORDING_DURATION = int(config['recording']['max_duration'])  # 60 seconds
         self.timer_id = None
         self.transcript_path = Path.home() / "whisper-transcript.txt"
         
@@ -170,7 +205,7 @@ class WhisperIndicatorApp:
             )
             
             self.nc_proc = subprocess.Popen(
-                ['nc', '192.168.0.197', '43007'],
+                ['nc', config['server']['host'], config['server']['port']],
                 stdin=self.audio_proc.stdout,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

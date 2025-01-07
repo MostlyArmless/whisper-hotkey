@@ -1,6 +1,6 @@
 # Whisper Hotkey
 
-This depends on you running [`whisper_online_server.py`](https://github.com/ufal/whisper_streaming/blob/main/whisper_online_server.py) on another local machine with a good GPU. Run it like this:
+This depends on you running a `whisper_streaming` [`whisper_online_server.py`](https://github.com/ufal/whisper_streaming/blob/main/whisper_online_server.py) on another local machine with a good GPU. Run it like this:
 
 ```bash
 export LD_LIBRARY_PATH=`python3 -c 'import os; import nvidia.cublas.lib; import nvidia.cudnn.lib; print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))'`
@@ -11,14 +11,14 @@ Then, on your desktop or whatever other ubuntu machine you're using, you can use
 
 ## Setup
 
-Install dependencies:
+### Install dependencies
 
 ```bash
 sudo apt install python3-gi gir1.2-gtk-3.0 python3-keybinder gir1.2-keybinder-3.0 xdotool python3-gi-cairo gir1.2-appindicator3-0.1
 pip install PyGObject
 ```
 
-Copy the service file to its destination, then enable it to run at startup:
+### Configure and run systemd service
 
 ```bash
 cp whisper-client.service ~/.config/systemd/user/whisper-client.service
@@ -28,6 +28,13 @@ systemctl --user start whisper-client
 
 You should now see a microphone icon appear in your toolbar. Click it to see the dropdown menu of options.
 Note that if you quit the app, systemd is configured to auto-restart it so that can be a way to restart the app if it's not working. (or, for development purposes, it's a nice way to restart the app after you've made changes to the code)
+
+### Modify config.ini file to point to the correct whisper server
+
+```bash
+nano ~/.config/whisper-client/config.ini
+# Modify the `server` field to point to the your whisper server IP address and port number, if not already set correctly
+```
 
 ## Run
 
