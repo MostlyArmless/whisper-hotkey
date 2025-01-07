@@ -28,6 +28,7 @@ class WhisperIndicatorApp:
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_label("", "")  # Initialize empty label
         
         # Create the menu
         self.menu = Gtk.Menu()
@@ -59,6 +60,9 @@ class WhisperIndicatorApp:
         self.text_queue = queue.Queue()
         self.seen_segments = set()
         self.recording_start_time = None
+        self.recording_duration = 0
+        self.MAX_RECORDING_DURATION = 60  # 60 seconds
+        self.timer_id = None
         self.transcript_path = Path.home() / "whisper-transcript.txt"
         
         Keybinder.init()
@@ -196,15 +200,40 @@ class WhisperIndicatorApp:
             self.is_recording = True
             self.seen_segments.clear()
             if self.start_recording():
+                self.recording_duration = 0
+                self.recording_start_time = time.time()
+                self.indicator.set_label("0s", "")  # Initialize timer display
+                self.timer_id = GLib.timeout_add(1000, self.update_timer)
                 self.update_status(self.labels['recording'])
                 GLib.timeout_add(100, self.process_text_queue)
             else:
                 self.is_recording = False
+                self.indicator.set_label("", "")  # Clear timer
                 self.update_status(self.labels['recording_error'])
         else:
             self.is_recording = False
             self.cleanup_recording()
+            if self.timer_id:
+                GLib.source_remove(self.timer_id)
+                self.timer_id = None
+            self.indicator.set_label("", "")  # Clear timer
             self.update_status(self.labels['ready'])
+
+    def update_timer(self):
+        if self.is_recording:
+            if self.recording_start_time is not None:
+                self.recording_duration = int(time.time() - self.recording_start_time)
+            else:
+                self.recording_duration = 0
+            # Update the indicator label with just the duration
+            self.indicator.set_label(f"{self.recording_duration}s", "")
+            
+            # Auto-stop after MAX_RECORDING_DURATION
+            if self.recording_duration >= self.MAX_RECORDING_DURATION:
+                GLib.idle_add(self.toggle_recording)
+                return False
+            return True
+        return False
 
     def run(self):
         Gtk.main()
