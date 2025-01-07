@@ -26,6 +26,9 @@ systemctl --user enable whisper-client
 systemctl --user start whisper-client
 ```
 
+You should now see a microphone icon appear in your toolbar. Click it to see the dropdown menu of options.
+Note that if you quit the app, systemd is configured to auto-restart it so that can be a way to restart the app if it's not working. (or, for development purposes, it's a nice way to restart the app after you've made changes to the code)
+
 ## Run
 
-The service should automatically start when you log into ubuntu. To start audio transcription, just hit the hotkey which is `Ctrl+Alt+R` by default.
+The service should automatically start when you log into ubuntu. To start audio transcription, just hit the hotkey which is `Ctrl+Alt+R` by default. The text will be typed into whatever app you have focused at the current cursor position. All transcribed text will be saved to `~/whisper-transcript.txt`, regardless of whether it is successfully typed into a target application or not, so you can always refer back to it later.

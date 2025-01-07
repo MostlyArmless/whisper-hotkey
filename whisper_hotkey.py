@@ -127,7 +127,10 @@ class WhisperIndicatorApp:
         try:
             while True:
                 text, received_time, chunk_duration, chunk_start_time = self.text_queue.get_nowait()
-                typed_time = time.time() - self.recording_start_time
+                if self.recording_start_time is not None:
+                    typed_time = time.time() - self.recording_start_time
+                else:
+                    typed_time = 0
                 self.type_text(text + " ")
                 self.text_queue.task_done()
         except queue.Empty:
@@ -137,7 +140,10 @@ class WhisperIndicatorApp:
     def read_output(self):
         while self.is_recording and self.nc_proc:
             try:
-                line = self.nc_proc.stdout.readline().decode().strip()
+                if self.nc_proc and self.nc_proc.stdout:
+                    line = self.nc_proc.stdout.readline().decode().strip()
+                else:
+                    break
                 if line:
                     parts = line.split('  ', 1)
                     if len(parts) == 2:
@@ -148,7 +154,7 @@ class WhisperIndicatorApp:
                         
                         if timestamp not in self.seen_segments:
                             self.seen_segments.add(timestamp)
-                            received_time = time.time() - self.recording_start_time
+                            received_time = time.time() - (self.recording_start_time or 0)
                             self.text_queue.put((text, received_time, chunk_duration, chunk_start_time))
             except Exception as e:
                 print(f"Error reading output: {e}")
@@ -171,7 +177,8 @@ class WhisperIndicatorApp:
                 preexec_fn=os.setsid
             )
 
-            self.audio_proc.stdout.close()
+            if self.audio_proc.stdout:
+                self.audio_proc.stdout.close()
             
             self.read_thread = threading.Thread(target=self.read_output)
             self.read_thread.daemon = True
