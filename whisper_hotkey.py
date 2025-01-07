@@ -11,9 +11,20 @@ import os
 import time
 import queue
 from pathlib import Path
+from subprocess import check_output
+
+def get_display():
+    try:
+        display = check_output(['w', '-hs']).decode().split()[2]
+        os.environ['DISPLAY'] = display
+    except:
+        os.environ['DISPLAY'] = ':0'
+
+get_display()
 
 class WhisperIndicatorApp:
     def __init__(self):
+        Gtk.init(None)
         self.hotkey = "<Ctrl><Alt>R"
         self.labels = {
             'recording_error': "🚫 Recording Error",
