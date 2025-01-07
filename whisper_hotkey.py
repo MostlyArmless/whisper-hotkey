@@ -91,11 +91,19 @@ class WhisperIndicatorApp:
         self.toggle_item = Gtk.MenuItem(label="Toggle Recording")
         self.toggle_item.connect('activate', self.toggle_recording)
         self.menu.append(self.toggle_item)
+
+        # Separator
+        self.menu.append(Gtk.SeparatorMenuItem())
         
-        # Quit item
-        quit_item = Gtk.MenuItem(label="Quit")
-        quit_item.connect('activate', self.cleanup_and_quit)
-        self.menu.append(quit_item)
+        # Restart Service item
+        restart_item = Gtk.MenuItem(label="Restart Service")
+        restart_item.connect('activate', self.restart_service)
+        self.menu.append(restart_item)
+        
+        # Quit Service item (stops the systemd service)
+        quit_service_item = Gtk.MenuItem(label="Quit Service")
+        quit_service_item.connect('activate', self.quit_service)
+        self.menu.append(quit_service_item)
         
         self.menu.show_all()
         self.indicator.set_menu(self.menu)
@@ -287,6 +295,13 @@ class WhisperIndicatorApp:
                 return False
             return True
         return False
+    
+    def restart_service(self, *args):
+        subprocess.run(['systemctl', '--user', 'restart', 'whisper-client'])
+
+    def quit_service(self, *args):
+        subprocess.run(['systemctl', '--user', 'stop', 'whisper-client'])
+        self.cleanup_and_quit()
 
     def run(self):
         Gtk.main()

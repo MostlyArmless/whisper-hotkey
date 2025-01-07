@@ -6,7 +6,7 @@ After=graphical-session.target
 Type=simple
 Environment=PYTHONPATH=/home/mike/dev/local-stt-tool/venv/lib/python3.10/site-packages
 ExecStart=/home/mike/dev/local-stt-tool/venv/bin/python /home/mike/dev/local-stt-tool/whisper_hotkey.py
-Restart=always
+Restart=on-failure
 RestartSec=5
 
 [Install]
