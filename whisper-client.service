@@ -1,0 +1,16 @@
+# This file needs to be created at ~/.config/systemd/user/whisper-client.service
+[Unit]
+Description=Whisper Speech-to-Text Client
+After=graphical-session.target
+
+[Service]
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+Environment=PATH=/home/mike/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/mike/dev/local-stt-tool/venv/bin/python
+ExecStart=/home/mike/dev/local-stt-tool/venv/bin/python /home/mike/dev/local-stt-tool/whisper_hotkey.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,6 +1,6 @@
 # Whisper Hotkey
 
-This depends on you running [`whisper_online_server.py`](https://github.com/ufal/whisper_streaming/blob/main/whisper_online_server.py) on another local machine with a good GPU like this:
+This depends on you running [`whisper_online_server.py`](https://github.com/ufal/whisper_streaming/blob/main/whisper_online_server.py) on another local machine with a good GPU. Run it like this:
 
 ```bash
 export LD_LIBRARY_PATH=`python3 -c 'import os; import nvidia.cublas.lib; import nvidia.cudnn.lib; print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))'`
@@ -14,21 +14,18 @@ Then, on your desktop or whatever other ubuntu machine you're using, you can use
 Install dependencies:
 
 ```bash
-sudo apt install python3-gi gir1.2-gtk-3.0 python3-keybinder gir1.2-keybinder-3.0 xdotool python3-gi-cairo
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-keybinder gir1.2-keybinder-3.0 xdotool python3-gi-cairo gir1.2-appindicator3-0.1
 pip install PyGObject
+```
+
+Copy the service file to its destination, then enable it to run at startup:
+
+```bash
+cp whisper-client.service ~/.config/systemd/user/whisper-client.service
+systemctl --user enable whisper-client
+systemctl --user start whisper-client
 ```
 
 ## Run
 
-This DOES NOT WORK from the vs code built in terminal if you have it installed as a snap package, run it from a native terminal window.
-
-```bash
-python whisper_hotkey.py
-```
-
-Now hit the Favorites button to start/stop recording
-
-## TODO
-
-The `install.sh` script is meant to install this as a systemd service, but it doesn't work yet.
-For now I'm just using an alias in my zshrc to launch this python script, and subsequently using the Favorites key to toggle recording on/off.
+The service should automatically start when you log into ubuntu. To start audio transcription, just hit the hotkey which is `Ctrl+Alt+R` by default.

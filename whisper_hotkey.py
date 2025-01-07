@@ -2,7 +2,8 @@
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Keybinder', '3.0')
-from gi.repository import Gtk, GLib, Keybinder
+gi.require_version('AppIndicator3', '0.1')
+from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk
 import subprocess
 import threading
 import signal
@@ -11,7 +12,7 @@ import time
 import queue
 from pathlib import Path
 
-class WhisperHotkeyApp:
+class WhisperIndicatorApp:
     def __init__(self):
         self.hotkey = "<Ctrl><Alt>R"
         self.labels = {
@@ -19,35 +20,38 @@ class WhisperHotkeyApp:
             'recording': f"🔴 Recording (Press {self.hotkey} to stop)",
             'ready': f"🎙️ Ready (Press {self.hotkey} to start)"
         }
-        self.window = Gtk.Window(title="Whisper Hotkey")
-        self.window.set_keep_above(True)
-        self.window.set_decorated(True)
-        self.window.set_default_size(150, 40)
         
-        outer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.window.add(outer_box)
+        # Initialize the indicator
+        self.indicator = AppIndicator3.Indicator.new(
+            'whisper-indicator',
+            'audio-input-microphone-symbolic',  # Using system icon
+            AppIndicator3.IndicatorCategory.APPLICATION_STATUS
+        )
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         
-        header = Gtk.HeaderBar()
-        header.set_decoration_layout("close:")
-        header.set_show_close_button(True)
-        self.window.set_titlebar(header)
+        # Create the menu
+        self.menu = Gtk.Menu()
         
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        outer_box.pack_start(self.box, True, True, 0)
+        # Status item (non-clickable)
+        self.status_item = Gtk.MenuItem(label=self.labels['ready'])
+        self.status_item.set_sensitive(False)
+        self.menu.append(self.status_item)
         
-        self.label = Gtk.Label(label=self.labels['ready'])
-        self.box.pack_start(self.label, True, True, 0)
+        # Separator
+        self.menu.append(Gtk.SeparatorMenuItem())
         
-        self.button = Gtk.Button(label="Toggle Recording")
-        self.button.connect("clicked", self.toggle_recording)
-        self.box.pack_start(self.button, True, True, 0)
+        # Toggle recording item
+        self.toggle_item = Gtk.MenuItem(label="Toggle Recording")
+        self.toggle_item.connect('activate', self.toggle_recording)
+        self.menu.append(self.toggle_item)
         
-        screen = self.window.get_screen()
-        visual = screen.get_rgba_visual()
-        if visual and screen.is_composited():
-            self.window.set_visual(visual)
-        self.window.set_app_paintable(True)
-        self.window.connect("draw", self.draw)
+        # Quit item
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect('activate', self.cleanup_and_quit)
+        self.menu.append(quit_item)
+        
+        self.menu.show_all()
+        self.indicator.set_menu(self.menu)
         
         self.is_recording = False
         self.audio_proc = None
@@ -60,16 +64,31 @@ class WhisperHotkeyApp:
         Keybinder.init()
         Keybinder.bind(self.hotkey, self.toggle_recording)
         
-        self.window.connect("delete-event", self.cleanup_and_quit)
-        self.window.show_all()
         GLib.timeout_add(100, self.process_text_queue)
 
-    def draw(self, widget, context):
-        context.set_source_rgba(0, 0, 0, 0.8)
-        context.set_operator(1)
-        context.paint()
-        return False
+    def update_status(self, text):
+      self.status_item.set_label(text)
+      if 'Recording' in text:
+          # Custom red recording icon
+          self.indicator.set_icon('media-record')  # Non-symbolic version
+          self.indicator.set_icon_full('media-record', 'Recording')
+          # Set icon color to red using theme override
+          css = b"""
+          .app-indicator-icon { color: #ff0000; }
+          """
+          style_provider = Gtk.CssProvider()
+          style_provider.load_from_data(css)
+          Gtk.StyleContext.add_provider_for_screen(
+              Gdk.Screen.get_default(),
+              style_provider,
+              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+          )
+      elif 'Error' in text:
+          self.indicator.set_icon('dialog-error-symbolic')
+      else:
+          self.indicator.set_icon('audio-input-microphone-symbolic')
 
+    # Your existing methods remain the same, just update status using update_status()
     def append_to_transcript(self, text):
         try:
             timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -156,7 +175,6 @@ class WhisperHotkeyApp:
                 os.killpg(os.getpgid(self.audio_proc.pid), signal.SIGTERM)
             except Exception as e:
                 print(f'ERROR while trying to kill audio_proc {self.audio_proc.pid}: {e}')
-                pass
             self.audio_proc = None
             
         if self.nc_proc:
@@ -164,7 +182,6 @@ class WhisperHotkeyApp:
                 os.killpg(os.getpgid(self.nc_proc.pid), signal.SIGTERM)
             except Exception as e:
                 print(f'ERROR while trying to kill nc_proc {self.nc_proc.pid}: {e}')
-                pass
             self.nc_proc = None
 
     def cleanup_and_quit(self, *args):
@@ -173,25 +190,25 @@ class WhisperHotkeyApp:
         Gtk.main_quit()
         return False
 
-    def toggle_recording(self, key=None):
+    def toggle_recording(self, *args):
         if not self.is_recording:
             # Start recording
             self.is_recording = True
             self.seen_segments.clear()
             if self.start_recording():
-                self.label.set_text(self.labels['recording'])
+                self.update_status(self.labels['recording'])
                 GLib.timeout_add(100, self.process_text_queue)
             else:
                 self.is_recording = False
-                self.label.set_text(self.labels['recording_error'])
+                self.update_status(self.labels['recording_error'])
         else:
             self.is_recording = False
             self.cleanup_recording()
-            self.label.set_text(self.labels['ready'])
+            self.update_status(self.labels['ready'])
 
     def run(self):
         Gtk.main()
 
 if __name__ == "__main__":
-    app = WhisperHotkeyApp()
+    app = WhisperIndicatorApp()
     app.run()
