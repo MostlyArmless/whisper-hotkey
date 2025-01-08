@@ -1,95 +1,53 @@
 #!/bin/bash
+
 set -e  # Exit on any error
 
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$HOME/.local/share/whisper-hotkey"
-AUTOSTART_DIR="$HOME/.config/autostart"
+# Get absolute path to repo directory
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+VENV_DIR="${REPO_DIR}/venv"
 
-echo "Installing required system packages..."
-# Only use sudo for apt commands
-sudo apt update
-sudo apt install -y \
-    python3-gi \
-    python3-gi-cairo \
-    gir1.2-gtk-3.0 \
-    gir1.2-keybinder-3.0 \
-    xdotool \
-    libgirepository1.0-dev \
-    pkg-config \
-    libcairo2-dev \
-    python3-dev \
-    python3-venv \
-    dbus-x11
+echo "Setting up Whisper Hotkey from ${REPO_DIR}..."
 
-echo "Creating installation directories..."
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$AUTOSTART_DIR"
+# Install system dependencies
+echo "Installing system dependencies..."
+sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-keybinder \
+    gir1.2-keybinder-3.0 xdotool python3-gi-cairo gir1.2-appindicator3-0.1
 
-echo "Creating launcher script..."
-cat > "$INSTALL_DIR/launcher.sh" << 'EOL'
-#!/bin/bash
+# Create and activate venv
+echo "Creating Python virtual environment..."
+python3 -m venv "${VENV_DIR}"
+source "${VENV_DIR}/bin/activate"
 
-# Check if already running
-if pgrep -f "python.*whisper_hotkey.py" > /dev/null; then
-    exit 0
-fi
+# Install Python dependencies
+echo "Installing Python dependencies..."
+pip install -r "${REPO_DIR}/requirements.txt"
 
-# Directory where the script is installed
-INSTALL_DIR="$HOME/.local/share/whisper-hotkey"
-VENV_DIR="$INSTALL_DIR/venv"
-SCRIPT="$INSTALL_DIR/whisper_hotkey.py"
+# Create systemd user directory if it doesn't exist
+mkdir -p ~/.config/systemd/user/
 
-# Ensure virtual environment exists
-if [ ! -d "$VENV_DIR" ]; then
-    # Create venv without pip to ensure we use system-wide packages
-    python3 -m venv "$VENV_DIR" --system-site-packages
-    source "$VENV_DIR/bin/activate"
-    # Install dependencies while allowing system-wide access
-    pip install --ignore-installed -r "$INSTALL_DIR/requirements.txt"
-else
-    source "$VENV_DIR/bin/activate"
-fi
+# Generate systemd service file
+echo "Generating systemd service file..."
+cat > ~/.config/systemd/user/whisper-client.service << EOF
+[Unit]
+Description=Whisper Speech-to-Text Client
+After=graphical-session.target
 
-# Run the script
-exec python "$SCRIPT"
-EOL
+[Service]
+Type=simple
+Environment=PYTHONPATH=${VENV_DIR}/lib/python3.10/site-packages
+ExecStart=${VENV_DIR}/bin/python ${REPO_DIR}/whisper_hotkey.py
+Restart=on-failure
+RestartSec=5
 
-chmod +x "$INSTALL_DIR/launcher.sh"
+[Install]
+WantedBy=graphical-session.target
+EOF
 
-echo "Creating desktop entry..."
-cat > "$AUTOSTART_DIR/whisper-hotkey.desktop" << EOL
-[Desktop Entry]
-Type=Application
-Name=Whisper Hotkey
-Exec=$INSTALL_DIR/launcher.sh
-Icon=audio-input-microphone
-Categories=Utility;
-X-GNOME-Autostart-enabled=true
-EOL
+# Enable and start service
+echo "Enabling and starting systemd service..."
+systemctl --user daemon-reload
+systemctl --user enable whisper-client
+systemctl --user start whisper-client
 
-echo "Setting up symlinks for python files..."
-ln -sf "$SCRIPT_DIR/whisper_hotkey.py" "$INSTALL_DIR/whisper_hotkey.py"
-ln -sf "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
-
-echo "Setting up keyboard shortcut..."
-# Ensure dbus session is available
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
-    eval `dbus-launch --sh-syntax`
-fi
-
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whisper-hotkey/']"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whisper-hotkey/ name "Whisper Hotkey"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whisper-hotkey/ command "$INSTALL_DIR/launcher.sh"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whisper-hotkey/ binding "XF86Favorites"
-
-echo "Installation complete! The app will:"
-echo "1. Start automatically on login"
-echo "2. Can be started manually with the Favorites key"
-echo "3. Use the Favorites key to toggle recording once running"
-echo ""
-echo "You can start it now by pressing the Favorites key or running:"
-echo "$INSTALL_DIR/launcher.sh"
-echo ""
-echo "To debug keyboard binding, run: xev | grep keycode"
-echo "Then press the Favorites key to see if it's detected"
+echo "Setup complete! The whisper-client service should now be running."
+echo "Check status with: systemctl --user status whisper-client"
