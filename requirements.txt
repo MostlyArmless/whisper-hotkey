@@ -55,9 +55,9 @@ Pillow==9.0.1
 protobuf==3.12.4
 proton-core==0.4.0
 proton-keyring-linux==0.2.0
-proton-vpn-api-core==0.38.2
-proton-vpn-gtk-app==4.8.1
-proton-vpn-network-manager==0.10.1
+proton-vpn-api-core==0.39.0
+proton-vpn-gtk-app==4.8.2
+proton-vpn-network-manager==0.10.2
 ptyprocess==0.7.0
 PyAudio==0.2.11
 pycairo==1.20.1
