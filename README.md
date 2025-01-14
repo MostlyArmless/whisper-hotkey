@@ -40,3 +40,10 @@ nano ~/.config/whisper-client/config.ini
 ## Run
 
 The service should automatically start when you log into Ubuntu. To start audio transcription, just hit the hotkey which is `Ctrl+Alt+R` by default. The text will be typed into whatever app you have focused at the current cursor position. All transcribed text will be saved to `~/whisper-transcript.txt`, regardless of whether it is successfully typed into a target application or not, so you can always refer back to it later.
+
+## Troubleshooting
+
+You can find the service definition file at `~/.config/systemd/user/whisper-client.service` if needed.
+To see the logs run `journalctl --user -u whisper-client.service -f`.
+If you make changes to the service file, you can reload it with `systemctl --user daemon-reload`.
+To restart the service run `systemctl --user restart whisper-client.service`.
