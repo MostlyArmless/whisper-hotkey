@@ -4,15 +4,11 @@ This is an Ubuntu tool that provides a hotkey to start audio transcription from 
 
 ## Server requirements
 
-You must first setup and run a [`whisper_online_server.py`](https://github.com/ufal/whisper_streaming/blob/main/whisper_online_server.py) on either your own machine or another local machine with a good GPU.
-Follow their setup instructions, then you'll run it like this:
+You must first setup and run a whisper_streaming server on either your own machine or another local machine with a good GPU.
+I've forked the original whisper_streaming repo and made some changes to make it easier to setup and run.
+To set up the server as a systemd service that will run on system boot, follow [my setup instructions](https://github.com/MostlyArmless/whisper_streaming/blob/mike/mike-readme.md).
 
-```bash
-export LD_LIBRARY_PATH=`python3 -c 'import os; import nvidia.cublas.lib; import nvidia.cudnn.lib; print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))'`
-python whisper_online_server.py --backend faster-whisper --lan en --task transcribe --model small.en --host 0.0.0.0
-```
-
-Then, on your ubuntu computer, you can use this tool to give you a hotkey + GUI that'll stream audio to the whisper server and stream the text into whatever app you have focused at the current cursor position.
+Then, on your Ubuntu computer, you can use this tool to give you a hotkey that'll stream audio to the whisper server and stream the text into whatever app you have focused at the current cursor position.
 
 ## Setup
 
