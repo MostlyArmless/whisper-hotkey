@@ -1,3 +1,4 @@
+from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk  # type: ignore
 import os
 import queue
 import signal
@@ -6,15 +7,17 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Set, Dict, Any
+from typing import Optional, Set
 
 import configparser
 import gi
 
+# These version requirements must be set before importing the gi modules
+# They ensure we're using compatible versions of GTK and related libraries
+# for creating the GUI, handling global hotkeys, and system tray functionality
 gi.require_version("Gtk", "3.0")
 gi.require_version("Keybinder", "3.0")
 gi.require_version("AppIndicator3", "0.1")
-from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk  # type: ignore
 
 
 class Config:
@@ -24,17 +27,19 @@ class Config:
     def load() -> configparser.ConfigParser:
         config = configparser.ConfigParser()
 
-        # Default values
+        # These default values will be used if no config file exists
         config["server"] = {"host": "localhost", "port": "43007"}
         config["hotkey"] = {"combination": "<Ctrl><Alt>R"}
         config["recording"] = {"max_duration": "60"}
 
+        # Store config in standard ~/.config directory
         config_path = Path.home() / ".config" / "whisper-client" / "config.ini"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         if config_path.exists():
             config.read(config_path)
         else:
+            # Create default config file if it doesn't exist
             with open(config_path, "w") as f:
                 config.write(f)
 
@@ -42,16 +47,26 @@ class Config:
 
 
 def setup_display() -> None:
-    """Set up the DISPLAY environment variable."""
+    """Set up the DISPLAY environment variable for X11 GUI operations.
+    This is particularly important when running as a service."""
     try:
+        # Try to get the current display from the 'w' command output
         display = subprocess.check_output(["w", "-hs"]).decode().split()[2]
         os.environ["DISPLAY"] = display
-    except:
+    except (subprocess.SubprocessError, IndexError):
+        # Fall back to :0 if we can't determine the display
         os.environ["DISPLAY"] = ":0"
 
 
 class WhisperIndicatorApp:
-    """Main application class for the Whisper indicator."""
+    """Main application class for the Whisper indicator.
+
+    This class handles:
+    - System tray icon and menu
+    - Recording state management
+    - Communication with whisper server
+    - Text output and transcript management
+    """
 
     def __init__(self):
         Gtk.init(None)
@@ -64,7 +79,14 @@ class WhisperIndicatorApp:
         self.setup_timers()
 
     def init_state(self) -> None:
-        """Initialize application state variables."""
+        """Initialize application state variables.
+
+        These variables track:
+        - Recording state and processes
+        - Text queue for processed speech
+        - Timers and durations
+        - File paths and settings
+        """
         self.is_recording = False
         self.audio_proc: Optional[subprocess.Popen] = None
         self.nc_proc: Optional[subprocess.Popen] = None
@@ -143,7 +165,13 @@ class WhisperIndicatorApp:
         self.server_check_timer = GLib.timeout_add(5000, self.check_server_status)
 
     def check_server_status(self) -> bool:
-        """Check if the whisper server is available."""
+        """Check if the whisper server is available.
+
+        This runs periodically to:
+        1. Test connection to server
+        2. Update status display
+        3. Track last successful connection time
+        """
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
@@ -240,7 +268,13 @@ class WhisperIndicatorApp:
         self.update_status(self.labels["ready"])
 
     def start_recording_processes(self) -> bool:
-        """Start the recording and network processes."""
+        """Start the recording and network processes.
+
+        This method:
+        1. Starts arecord to capture audio
+        2. Pipes audio to netcat (nc) which sends it to the whisper server
+        3. Creates a thread to read the server's responses
+        """
         try:
             self.audio_proc = subprocess.Popen(
                 [
@@ -284,7 +318,13 @@ class WhisperIndicatorApp:
             return False
 
     def read_output(self) -> None:
-        """Read and process output from the whisper server."""
+        """Read and process output from the whisper server.
+
+        The server sends lines in format:
+        "start_ms end_ms  transcribed_text"
+
+        This method parses these lines and queues the text for typing.
+        """
         while self.is_recording and self.nc_proc and self.nc_proc.stdout:
             try:
                 line = self.nc_proc.stdout.readline().decode().strip()
@@ -312,7 +352,13 @@ class WhisperIndicatorApp:
                 break
 
     def process_text_queue(self) -> bool:
-        """Process queued text from the whisper server."""
+        """Process queued text from the whisper server.
+
+        This runs periodically to:
+        1. Check for new transcribed text
+        2. Type the text using xdotool
+        3. Save to transcript file
+        """
         try:
             while True:
                 text, received_time, chunk_duration, chunk_start_time = (
