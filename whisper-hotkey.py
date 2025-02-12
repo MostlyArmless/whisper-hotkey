@@ -60,10 +60,12 @@ class WhisperIndicatorApp:
     def __init__(self):
         Gtk.init(None)
         self.hotkey = config["hotkey"]["combination"]
+        self.last_successful_connection = time.time()  # Initialize with current time
         self.labels = {
             "recording_error": "🚫 Recording Error",
             "recording": f"🔴 Recording (Press {self.hotkey} to stop)",
             "ready": f"🎙️ Ready (Press {self.hotkey} to start)",
+            "server_error": "❌ Server Unavailable",
         }
 
         # Initialize the indicator
@@ -125,16 +127,62 @@ class WhisperIndicatorApp:
 
         GLib.timeout_add(100, self.process_text_queue)
 
+        # Add server check timer
+        server_hearbeat_period = 5000  # ms
+        self.server_check_timer = GLib.timeout_add(
+            server_hearbeat_period, self.check_server_status
+        )
+
+    def check_server_status(self):
+        """Check if the server is available by attempting a quick connection."""
+        try:
+            # Attempt to connect with a short timeout
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)  # 1 second timeout
+            result = sock.connect_ex(
+                (config["server"]["host"], int(config["server"]["port"]))
+            )
+            sock.close()
+
+            if result == 0:
+                self.last_successful_connection = time.time()
+                if not self.is_recording:
+                    self.update_status(self.labels["ready"])
+            else:
+                if not self.is_recording:
+                    self.update_status(self.labels["server_error"])
+        except Exception as e:
+            print(f"Server check error: {e}")
+            if not self.is_recording:
+                self.update_status(self.labels["server_error"])
+
+        self.update_connection_time()
+        return True  # Keep the timer running
+
+    def update_connection_time(self):
+        """Update the status text with time since last connection"""
+        elapsed = time.time() - self.last_successful_connection
+        if elapsed < 60:
+            time_text = f"{int(elapsed)}s ago"
+        elif elapsed < 3600:
+            time_text = f"{int(elapsed / 60)}m ago"
+        else:
+            time_text = f"{int(elapsed / 3600)}h ago"
+
+        current_text = self.status_item.get_label()
+        base_text = current_text.split(" (Last seen:")[
+            0
+        ]  # Remove old timestamp if exists
+        self.status_item.set_label(f"{base_text} (Last seen: {time_text})")
+
     def update_status(self, text):
         self.status_item.set_label(text)
         if "Recording" in text:
-            # Custom red recording icon
-            self.indicator.set_icon("media-record")  # Non-symbolic version
+            self.indicator.set_icon("media-record")
             self.indicator.set_icon_full("media-record", "Recording")
-            # Set icon color to red using theme override
             css = b"""
-          .app-indicator-icon { color: #ff0000; }
-          """
+            .app-indicator-icon { color: #ff0000; }
+            """
             style_provider = Gtk.CssProvider()
             style_provider.load_from_data(css)
             Gtk.StyleContext.add_provider_for_screen(
@@ -142,12 +190,11 @@ class WhisperIndicatorApp:
                 style_provider,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
-        elif "Error" in text:
-            self.indicator.set_icon("dialog-error-symbolic")
+        elif "Error" in text or "Unavailable" in text:
+            self.indicator.set_icon("network-error-symbolic")
         else:
             self.indicator.set_icon("audio-input-microphone-symbolic")
 
-    # Your existing methods remain the same, just update status using update_status()
     def append_to_transcript(self, text):
         try:
             timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -246,6 +293,8 @@ class WhisperIndicatorApp:
             self.read_thread.daemon = True
             self.read_thread.start()
 
+            self.last_successful_connection = time.time()
+            self.update_connection_time()
             return True
 
         except Exception as e:
@@ -273,6 +322,8 @@ class WhisperIndicatorApp:
     def cleanup_and_quit(self, *args):
         self.is_recording = False
         self.cleanup_recording()
+        if hasattr(self, "server_check_timer"):
+            GLib.source_remove(self.server_check_timer)
         Gtk.main_quit()
         return False
 
