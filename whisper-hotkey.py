@@ -1,9 +1,3 @@
-import gi
-
-gi.require_version("Gtk", "3.0")
-gi.require_version("Keybinder", "3.0")
-gi.require_version("AppIndicator3", "0.1")
-from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk
 import subprocess
 import threading
 import signal
@@ -13,6 +7,13 @@ import queue
 from pathlib import Path
 from subprocess import check_output
 import configparser
+import gi
+import socket
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Keybinder", "3.0")
+gi.require_version("AppIndicator3", "0.1")
+from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk  # type: ignore # noqa: E402
 
 
 def load_config():
