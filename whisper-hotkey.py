@@ -405,8 +405,13 @@ class WhisperIndicatorApp:
         self.indicator.set_label(f"{self.recording_duration}s", "")
 
         if self.recording_duration >= self.max_recording_duration:
+            # Stop the timer, toggle recording, and play a beep sound to indicate the end of the recording
             GLib.idle_add(self.toggle_recording)
+            subprocess.run(
+                ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"]
+            )
             return False
+
         return True
 
     def cleanup_recording(self) -> None:
