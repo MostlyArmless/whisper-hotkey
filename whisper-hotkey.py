@@ -7,6 +7,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional, Set
+import re
 
 import configparser
 import gi
@@ -137,10 +138,28 @@ class SettingsDialog(Gtk.Dialog):
             if duration <= 0:
                 raise ValueError("Max duration must be positive")
 
-            # Validate host (basic check)
+            # Enhanced host validation
             host = self.host_entry.get_text().strip()
             if not host:
                 raise ValueError("Host cannot be empty")
+
+            # Check if it's an IP address
+            try:
+                # Try parsing as IPv4
+                parts = host.split(".")
+                if len(parts) == 4 and all(0 <= int(part) <= 255 for part in parts):
+                    return True
+
+                # Try parsing as IPv6
+                socket.inet_pton(socket.AF_INET6, host)
+                return True
+
+            except (ValueError, socket.error):
+                # Not an IP address, validate as domain name
+                if not self.is_valid_domain(host):
+                    raise ValueError(
+                        "Invalid host format. Please enter a valid IP address or domain name"
+                    )
 
             # Validate hotkey (basic check)
             hotkey = self.hotkey_entry.get_text().strip()
@@ -160,6 +179,22 @@ class SettingsDialog(Gtk.Dialog):
             dialog.run()
             dialog.destroy()
             return False
+
+    def is_valid_domain(self, domain):
+        """Validate domain name format."""
+        if len(domain) > 255:
+            return False
+
+        # Allow localhost
+        if domain == "localhost":
+            return True
+
+        # Domain name validation pattern
+        pattern = r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+        if re.match(pattern, domain):
+            return True
+
+        return False
 
     def save_settings(self):
         """Save the settings to the config.ini file."""
@@ -769,22 +804,27 @@ class WhisperIndicatorApp:
 
         # Create new dialog
         self.settings_dialog = SettingsDialog(None, self.config)
-        response = self.settings_dialog.run()
+        while True:  # Keep showing dialog until valid input or cancel
+            response = self.settings_dialog.run()
 
-        if response == Gtk.ResponseType.OK:
-            if self.settings_dialog.validate():
-                self.settings_dialog.save_settings()
-                # Rebind hotkey with new combination
-                Keybinder.unbind(self.hotkey)
-                self.hotkey = self.config["hotkey"]["combination"]
-                Keybinder.bind(self.hotkey, self.toggle_recording)
-                # Update max recording duration
-                self.max_recording_duration = int(
-                    self.config["recording"]["max_duration"]
-                )
-                # Update status labels with new hotkey
-                self.setup_status_labels()
-                self.update_status(self.labels["ready"])
+            if response == Gtk.ResponseType.OK:
+                if self.settings_dialog.validate():
+                    self.settings_dialog.save_settings()
+                    # Rebind hotkey with new combination
+                    Keybinder.unbind(self.hotkey)
+                    self.hotkey = self.config["hotkey"]["combination"]
+                    Keybinder.bind(self.hotkey, self.toggle_recording)
+                    # Update max recording duration
+                    self.max_recording_duration = int(
+                        self.config["recording"]["max_duration"]
+                    )
+                    # Update status labels with new hotkey
+                    self.setup_status_labels()
+                    self.update_status(self.labels["ready"])
+                    break  # Exit loop only if validation succeeds
+                # If validation fails, continue loop to show dialog again
+            else:  # CANCEL or dialog closed
+                break  # Exit loop if user cancels
 
         self.settings_dialog.destroy()
         self.settings_dialog = None
