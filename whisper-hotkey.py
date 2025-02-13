@@ -374,7 +374,8 @@ class WhisperIndicatorApp:
         if self.start_recording_processes():
             self.recording_duration = 0
             self.recording_start_time = time.time()
-            self.indicator.set_label("0s", "")
+            # Update initial display to show 0/max format
+            self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
             self.timer_id = GLib.timeout_add(1000, self.update_timer)
             self.update_status(self.labels["recording"])
             GLib.timeout_add(100, self.process_text_queue)
@@ -528,7 +529,10 @@ class WhisperIndicatorApp:
         else:
             self.recording_duration = 0
 
-        self.indicator.set_label(f"{self.recording_duration}s", "")
+        # Show current/max duration format
+        self.indicator.set_label(
+            f"{self.recording_duration}/{self.max_recording_duration}s", ""
+        )
 
         if self.recording_duration >= self.max_recording_duration:
             # Stop the timer, toggle recording, and play a beep sound to indicate the end of the recording
