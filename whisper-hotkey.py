@@ -10,6 +10,7 @@ from typing import Optional, Set
 
 import configparser
 import gi
+import json
 
 # These version requirements must be set before importing the gi modules
 # They ensure we're using compatible versions of GTK and related libraries
@@ -217,8 +218,10 @@ class WhisperIndicatorApp:
         self.recording_duration = 0
         self.last_successful_connection = time.time()
         self.timer_id: Optional[int] = None
-        self.transcript_path = Path.home() / "whisper-transcript.txt"
+        self.transcript_path = Path.home() / "whisper-transcript.json"
         self.max_recording_duration = int(self.config["recording"]["max_duration"])
+        self.current_session_text = []
+        self.session_start_time = None
 
     def init_ui(self) -> None:
         """Initialize UI components."""
@@ -370,11 +373,12 @@ class WhisperIndicatorApp:
         """Start a new recording session."""
         self.is_recording = True
         self.seen_segments.clear()
+        self.current_session_text = []
+        self.session_start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
         if self.start_recording_processes():
             self.recording_duration = 0
             self.recording_start_time = time.time()
-            # Update initial display to show 0/max format
             self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
             self.timer_id = GLib.timeout_add(1000, self.update_timer)
             self.update_status(self.labels["recording"])
@@ -386,6 +390,8 @@ class WhisperIndicatorApp:
 
     def stop_recording_session(self) -> None:
         """Stop the current recording session."""
+        if self.current_session_text:
+            self.save_session_transcript()
         self.is_recording = False
         self.cleanup_recording()
         if self.timer_id:
@@ -500,24 +506,45 @@ class WhisperIndicatorApp:
     def type_text(self, text: str) -> bool:
         """Type the text and save to transcript."""
         try:
+            # Append to current session first in case the text is not typed. We don't want to lose anything.
+            self.append_to_transcript(text.strip())
             subprocess.run(
                 ["xdotool", "type", "--clearmodifiers", "--delay", "1", text],
                 check=True,
             )
-            self.append_to_transcript(text.strip())
             return True
         except subprocess.CalledProcessError as e:
             print(f"Error typing text: {e}")
             return False
 
     def append_to_transcript(self, text: str) -> None:
-        """Append text to the transcript file."""
+        """Append text to the current session."""
+        self.current_session_text.append(text)
+
+    def save_session_transcript(self) -> None:
+        """Save the current session's transcript to the JSON file."""
         try:
-            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-            with open(self.transcript_path, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp} - {text}\n")
+            # Create empty JSON if file doesn't exist
+            if not self.transcript_path.exists():
+                with open(self.transcript_path, "w", encoding="utf-8") as f:
+                    json.dump({}, f, indent=2)
+
+            # Read existing transcripts
+            with open(self.transcript_path, "r", encoding="utf-8") as f:
+                transcripts = json.load(f)
+
+            # Add new session
+            if self.session_start_time:
+                transcripts[self.session_start_time] = " ".join(
+                    self.current_session_text
+                )
+
+            # Write back to file
+            with open(self.transcript_path, "w", encoding="utf-8") as f:
+                json.dump(transcripts, f, indent=2)
+
         except Exception as e:
-            print(f"Error writing to transcript: {e}")
+            print(f"Error saving transcript: {e}")
 
     def update_timer(self) -> bool:
         """Update the recording timer display."""
