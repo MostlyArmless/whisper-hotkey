@@ -356,8 +356,8 @@ class WhisperIndicatorApp:
             time_text = f"{int(elapsed / 3600)}h ago"
 
         current_text = self.status_item.get_label()
-        base_text = current_text.split(" (Last seen:")[0]
-        self.status_item.set_label(f"{base_text} (Last seen: {time_text})")
+        base_text = current_text.split(" (Server Last seen:")[0]
+        self.status_item.set_label(f"{base_text} (Server Last seen: {time_text})")
 
     def toggle_recording(self, *args) -> None:
         """Toggle recording state."""
