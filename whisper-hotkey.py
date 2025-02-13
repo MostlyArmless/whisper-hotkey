@@ -279,15 +279,15 @@ class WhisperIndicatorApp:
             self.audio_proc = subprocess.Popen(
                 [
                     "arecord",
-                    "-f",
-                    "S16_LE",
-                    "-c1",
-                    "-r",
-                    "16000",
-                    "-t",
-                    "raw",
-                    "-D",
-                    "default",
+                    "-f",  # Format:
+                    "S16_LE",  # 16-bit signed integers, little-endian
+                    "-c1",  # Single channel (mono) recording
+                    "-r",  # Sample rate:
+                    "16000",  # 16kHz
+                    "-t",  # Audio type:
+                    "raw",  # Raw audio format (no header) for direct streaming
+                    "-D",  # Device:
+                    "default",  # Use system default ALSA audio input device
                 ],
                 stdout=subprocess.PIPE,
                 preexec_fn=os.setsid,
