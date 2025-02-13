@@ -43,3 +43,11 @@ You can find the service definition file at `~/.config/systemd/user/whisper-clie
 To see the logs run `journalctl --user -u whisper-client.service -f`.
 If you make changes to the service file, you can reload it with `systemctl --user daemon-reload`.
 To restart the service run `systemctl --user restart whisper-client.service`.
+
+## Feature wishlist
+
+* Make it so that the hotkey can be changed in the GUI.
+* Add a button to the dropdown menu which will open a list of all recent transcriptions, and allow you to copy one of them to the clipboard.
+  * This will be useful for when the transcribed text is not successfully typed into the target application.
+* Automatically detect when there is no valid microphone connected and disable the microphone icon and hotkey.
+  * The icon should change to the "no microphone" icon.
