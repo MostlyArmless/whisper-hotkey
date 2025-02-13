@@ -91,13 +91,13 @@ class SettingsDialog(Gtk.Dialog):
 
         # Server settings
         row = 0
-        grid.attach(Gtk.Label(label="Server Host:"), 0, row, 1, 1)
+        grid.attach(Gtk.Label(label="Whisper server IP address:"), 0, row, 1, 1)
         self.host_entry = Gtk.Entry()
         self.host_entry.set_text(config["server"]["host"])
         grid.attach(self.host_entry, 1, row, 1, 1)
 
         row += 1
-        grid.attach(Gtk.Label(label="Server Port:"), 0, row, 1, 1)
+        grid.attach(Gtk.Label(label="Whisper Server Port Number:"), 0, row, 1, 1)
         self.port_entry = Gtk.Entry()
         self.port_entry.set_text(config["server"]["port"])
         grid.attach(self.port_entry, 1, row, 1, 1)
@@ -113,6 +113,13 @@ class SettingsDialog(Gtk.Dialog):
         self.duration_entry = Gtk.Entry()
         self.duration_entry.set_text(config["recording"]["max_duration"])
         grid.attach(self.duration_entry, 1, row, 1, 1)
+
+        # Add Restore Defaults button
+        row += 1
+        restore_defaults_button = Gtk.Button(label="Restore Defaults")
+        restore_defaults_button.connect("clicked", self.restore_defaults)
+        restore_defaults_button.set_margin_top(10)
+        grid.attach(restore_defaults_button, 0, row, 2, 1)
 
         self.show_all()
 
@@ -164,6 +171,12 @@ class SettingsDialog(Gtk.Dialog):
         with open(config_path, "w") as f:
             self.config.write(f)
 
+    def restore_defaults(self, button):
+        """Restore default settings values for port, hotkey and duration."""
+        self.port_entry.set_text("43007")
+        self.hotkey_entry.set_text("<Ctrl><Alt>R")
+        self.duration_entry.set_text("60")
+
 
 class WhisperIndicatorApp:
     """Main application class for the Whisper indicator.
@@ -179,6 +192,7 @@ class WhisperIndicatorApp:
         Gtk.init(None)
         self.config = Config.load()
         self.hotkey = self.config["hotkey"]["combination"]
+        self.settings_dialog = None  # Add this line to track the dialog instance
 
         self.init_state()
         self.init_ui()
@@ -558,12 +572,18 @@ class WhisperIndicatorApp:
 
     def show_settings(self, widget) -> None:
         """Show the settings dialog."""
-        dialog = SettingsDialog(None, self.config)
-        response = dialog.run()
+        # If dialog exists, just present it
+        if self.settings_dialog is not None:
+            self.settings_dialog.present()
+            return
+
+        # Create new dialog
+        self.settings_dialog = SettingsDialog(None, self.config)
+        response = self.settings_dialog.run()
 
         if response == Gtk.ResponseType.OK:
-            if dialog.validate():
-                dialog.save_settings()
+            if self.settings_dialog.validate():
+                self.settings_dialog.save_settings()
                 # Rebind hotkey with new combination
                 Keybinder.unbind(self.hotkey)
                 self.hotkey = self.config["hotkey"]["combination"]
@@ -576,7 +596,8 @@ class WhisperIndicatorApp:
                 self.setup_status_labels()
                 self.update_status(self.labels["ready"])
 
-        dialog.destroy()
+        self.settings_dialog.destroy()
+        self.settings_dialog = None
 
     def run(self) -> None:
         """Start the application main loop."""
