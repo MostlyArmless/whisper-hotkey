@@ -1,4 +1,3 @@
-from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk  # type: ignore
 import os
 import queue
 import signal
@@ -18,6 +17,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Keybinder", "3.0")
 gi.require_version("AppIndicator3", "0.1")
+from gi.repository import Gtk, GLib, Keybinder, AppIndicator3, Gdk  # noqa: E402 # type: ignore[import]
 
 
 class Config:
