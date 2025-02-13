@@ -58,6 +58,109 @@ def setup_display() -> None:
         os.environ["DISPLAY"] = ":0"
 
 
+class SettingsDialog(Gtk.Dialog):
+    """Dialog for editing application settings."""
+
+    def __init__(self, parent, config):
+        super().__init__(
+            title="Whisper Settings", parent=parent, flags=Gtk.DialogFlags.MODAL
+        )
+
+        self.config = config
+        self.add_buttons(
+            Gtk.STOCK_CANCEL,
+            Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_SAVE,
+            Gtk.ResponseType.OK,
+        )
+
+        # Create the form layout
+        box = self.get_content_area()
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(10)
+        grid.set_margin_start(10)
+        grid.set_margin_end(10)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(10)
+        box.add(grid)
+
+        # Server settings
+        row = 0
+        grid.attach(Gtk.Label(label="Server Host:"), 0, row, 1, 1)
+        self.host_entry = Gtk.Entry()
+        self.host_entry.set_text(config["server"]["host"])
+        grid.attach(self.host_entry, 1, row, 1, 1)
+
+        row += 1
+        grid.attach(Gtk.Label(label="Server Port:"), 0, row, 1, 1)
+        self.port_entry = Gtk.Entry()
+        self.port_entry.set_text(config["server"]["port"])
+        grid.attach(self.port_entry, 1, row, 1, 1)
+
+        row += 1
+        grid.attach(Gtk.Label(label="Hotkey:"), 0, row, 1, 1)
+        self.hotkey_entry = Gtk.Entry()
+        self.hotkey_entry.set_text(config["hotkey"]["combination"])
+        grid.attach(self.hotkey_entry, 1, row, 1, 1)
+
+        row += 1
+        grid.attach(Gtk.Label(label="Max Recording Duration (seconds):"), 0, row, 1, 1)
+        self.duration_entry = Gtk.Entry()
+        self.duration_entry.set_text(config["recording"]["max_duration"])
+        grid.attach(self.duration_entry, 1, row, 1, 1)
+
+        self.show_all()
+
+    def validate(self):
+        """Validate the input values."""
+        try:
+            # Validate port
+            port = int(self.port_entry.get_text())
+            if not (1 <= port <= 65535):
+                raise ValueError("Port must be between 1 and 65535")
+
+            # Validate max duration
+            duration = int(self.duration_entry.get_text())
+            if duration <= 0:
+                raise ValueError("Max duration must be positive")
+
+            # Validate host (basic check)
+            host = self.host_entry.get_text().strip()
+            if not host:
+                raise ValueError("Host cannot be empty")
+
+            # Validate hotkey (basic check)
+            hotkey = self.hotkey_entry.get_text().strip()
+            if not hotkey:
+                raise ValueError("Hotkey cannot be empty")
+
+            return True
+
+        except ValueError as e:
+            dialog = Gtk.MessageDialog(
+                parent=self,
+                flags=Gtk.DialogFlags.MODAL,
+                type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                message_format=str(e),
+            )
+            dialog.run()
+            dialog.destroy()
+            return False
+
+    def save_settings(self):
+        """Save the settings to the config.ini file."""
+        self.config["server"]["host"] = self.host_entry.get_text()
+        self.config["server"]["port"] = self.port_entry.get_text()
+        self.config["hotkey"]["combination"] = self.hotkey_entry.get_text()
+        self.config["recording"]["max_duration"] = self.duration_entry.get_text()
+
+        config_path = Path.home() / ".config" / "whisper-client" / "config.ini"
+        with open(config_path, "w") as f:
+            self.config.write(f)
+
+
 class WhisperIndicatorApp:
     """Main application class for the Whisper indicator.
 
@@ -139,6 +242,11 @@ class WhisperIndicatorApp:
         toggle_item = Gtk.MenuItem(label="Toggle Recording")
         toggle_item.connect("activate", self.toggle_recording)
         self.menu.append(toggle_item)
+
+        # Add Settings item
+        settings_item = Gtk.MenuItem(label="Settings")
+        settings_item.connect("activate", self.show_settings)
+        self.menu.append(settings_item)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
@@ -443,6 +551,28 @@ class WhisperIndicatorApp:
         """Stop the whisper client service."""
         subprocess.run(["systemctl", "--user", "stop", "whisper-client"])
         self.cleanup_and_quit()
+
+    def show_settings(self, widget) -> None:
+        """Show the settings dialog."""
+        dialog = SettingsDialog(None, self.config)
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            if dialog.validate():
+                dialog.save_settings()
+                # Rebind hotkey with new combination
+                Keybinder.unbind(self.hotkey)
+                self.hotkey = self.config["hotkey"]["combination"]
+                Keybinder.bind(self.hotkey, self.toggle_recording)
+                # Update max recording duration
+                self.max_recording_duration = int(
+                    self.config["recording"]["max_duration"]
+                )
+                # Update status labels with new hotkey
+                self.setup_status_labels()
+                self.update_status(self.labels["ready"])
+
+        dialog.destroy()
 
     def run(self) -> None:
         """Start the application main loop."""
