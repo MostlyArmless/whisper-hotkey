@@ -222,13 +222,61 @@ class TranscriptViewerDialog(Gtk.Dialog):
         text_col.set_min_width(350)
         self.view.append_column(text_col)
 
-        # Add copy button column
+        # Replace the copy button column code with this button-styled version
         copy_renderer = Gtk.CellRendererPixbuf()
-        copy_col = Gtk.TreeViewColumn("Copy", copy_renderer, icon_name=2)
-        copy_col.set_fixed_width(50)
-        self.store = Gtk.ListStore(str, str, str)  # timestamp, text, icon
-        self.view.set_model(self.store)
+        copy_renderer.props.icon_name = "edit-copy-symbolic"
+        copy_renderer.props.stock_size = Gtk.IconSize.BUTTON
+        copy_renderer.props.xpad = 8
+        copy_renderer.props.ypad = 6
+
+        copy_col = Gtk.TreeViewColumn()
+        copy_col.pack_start(copy_renderer, True)
+        copy_col.set_fixed_width(36)
+        copy_col.set_alignment(0.5)
+        copy_col.set_title("")
         self.view.append_column(copy_col)
+
+        # Update CSS styling to include button effects
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"""
+            treeview {
+                padding: 5px;
+            }
+            treeview:hover {
+                background-color: alpha(@theme_selected_bg_color, 0.1);
+            }
+            .cell {
+                padding: 4px;
+            }
+            .cell:hover {
+                background-color: @theme_selected_bg_color;
+                border-radius: 4px;
+                box-shadow: inset 0 1px rgba(255, 255, 255, 0.1),
+                           inset 0 -1px rgba(0, 0, 0, 0.1);
+            }
+            .copy-button {
+                background-color: @theme_bg_color;
+                border: 1px solid @borders;
+                border-radius: 4px;
+                padding: 4px;
+                box-shadow: inset 0 1px rgba(255, 255, 255, 0.1),
+                           inset 0 -1px rgba(0, 0, 0, 0.1);
+            }
+            .copy-button:hover {
+                background-color: @theme_selected_bg_color;
+            }
+        """)
+
+        # Apply the CSS styling
+        style_context = self.view.get_style_context()
+        style_context.add_provider(
+            css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        style_context.add_class("copy-button")
+
+        # Update the ListStore to not include the icon name since we set it in the renderer
+        self.store = Gtk.ListStore(str, str)  # timestamp, text only
+        self.view.set_model(self.store)
 
         scrolled.add(self.view)
 
@@ -239,9 +287,7 @@ class TranscriptViewerDialog(Gtk.Dialog):
                     transcripts = json.load(f)
                     # Sort by timestamp in reverse order (newest first)
                     for timestamp in sorted(transcripts.keys(), reverse=True):
-                        self.store.append(
-                            [timestamp, transcripts[timestamp], "edit-copy-symbolic"]
-                        )
+                        self.store.append([timestamp, transcripts[timestamp]])
         except Exception as e:
             print(f"Error loading transcripts: {e}")
 
@@ -260,7 +306,9 @@ class TranscriptViewerDialog(Gtk.Dialog):
             return False
 
         path, column, _, _ = path_info
-        if column.get_title() == "Copy":
+        if (
+            column == treeview.get_columns()[-1]
+        ):  # Check if it's the last column (copy button)
             model = treeview.get_model()
             text = model[path][1]  # Get transcript text
 
@@ -268,16 +316,18 @@ class TranscriptViewerDialog(Gtk.Dialog):
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(text, -1)
 
-            # Show feedback
-            dialog = Gtk.MessageDialog(
-                parent=self,
-                flags=Gtk.DialogFlags.MODAL,
-                type=Gtk.MessageType.INFO,
-                buttons=Gtk.ButtonsType.OK,
-                message_format="Transcript copied to clipboard",
-            )
-            dialog.run()
-            dialog.destroy()
+            # Show a more subtle feedback tooltip instead of a dialog
+            tooltip = Gtk.Window(type=Gtk.WindowType.POPUP)
+            tooltip.set_type_hint(Gdk.WindowTypeHint.TOOLTIP)
+            tooltip.set_position(Gtk.WindowPosition.MOUSE)
+
+            label = Gtk.Label(label="Copied to clipboard!")
+            label.set_padding(10, 5)
+            tooltip.add(label)
+            tooltip.show_all()
+
+            # Remove tooltip after 1 second
+            GLib.timeout_add(1000, tooltip.destroy)
             return True
 
         return False
