@@ -66,6 +66,10 @@ class SettingsDialog(Gtk.Dialog):
             title="Whisper Settings", parent=parent, flags=Gtk.DialogFlags.MODAL
         )
 
+        # Force dialog to stay on top
+        self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+        self.set_keep_above(True)
+
         self.config = config
         self.add_buttons(
             Gtk.STOCK_CANCEL,
