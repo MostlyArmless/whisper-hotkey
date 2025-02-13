@@ -179,6 +179,110 @@ class SettingsDialog(Gtk.Dialog):
         self.duration_entry.set_text("60")
 
 
+class TranscriptViewerDialog(Gtk.Dialog):
+    """Dialog for viewing and copying transcripts."""
+
+    def __init__(self, parent, transcript_path):
+        super().__init__(
+            title="Transcript History",
+            parent=parent,
+            flags=Gtk.DialogFlags.MODAL,
+        )
+
+        self.set_default_size(600, 400)
+        self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+        self.set_keep_above(True)
+
+        # Add close button
+        self.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
+
+        # Create scrolled window
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        box = self.get_content_area()
+        box.pack_start(scrolled, True, True, 0)
+
+        # Create list store and view
+        self.store = Gtk.ListStore(str, str)  # timestamp, text
+        self.view = Gtk.TreeView(model=self.store)
+
+        # Add columns
+        timestamp_renderer = Gtk.CellRendererText()
+        timestamp_renderer.props.wrap_width = 150
+        timestamp_col = Gtk.TreeViewColumn("Timestamp", timestamp_renderer, text=0)
+        timestamp_col.set_resizable(True)
+        timestamp_col.set_min_width(150)
+        self.view.append_column(timestamp_col)
+
+        text_renderer = Gtk.CellRendererText()
+        text_renderer.props.wrap_width = 350
+        text_renderer.props.wrap_mode = 2  # WRAP_WORD
+        text_col = Gtk.TreeViewColumn("Transcript", text_renderer, text=1)
+        text_col.set_resizable(True)
+        text_col.set_min_width(350)
+        self.view.append_column(text_col)
+
+        # Add copy button column
+        copy_renderer = Gtk.CellRendererPixbuf()
+        copy_col = Gtk.TreeViewColumn("Copy", copy_renderer, icon_name=2)
+        copy_col.set_fixed_width(50)
+        self.store = Gtk.ListStore(str, str, str)  # timestamp, text, icon
+        self.view.set_model(self.store)
+        self.view.append_column(copy_col)
+
+        scrolled.add(self.view)
+
+        # Load transcripts
+        try:
+            if transcript_path.exists():
+                with open(transcript_path, "r", encoding="utf-8") as f:
+                    transcripts = json.load(f)
+                    # Sort by timestamp in reverse order (newest first)
+                    for timestamp in sorted(transcripts.keys(), reverse=True):
+                        self.store.append(
+                            [timestamp, transcripts[timestamp], "edit-copy-symbolic"]
+                        )
+        except Exception as e:
+            print(f"Error loading transcripts: {e}")
+
+        # Handle click events for copy button
+        self.view.connect("button-press-event", self.on_button_press)
+
+        self.show_all()
+
+    def on_button_press(self, treeview, event):
+        """Handle click events on the tree view."""
+        if event.button != 1:  # Left click only
+            return False
+
+        path_info = treeview.get_path_at_pos(int(event.x), int(event.y))
+        if not path_info:
+            return False
+
+        path, column, _, _ = path_info
+        if column.get_title() == "Copy":
+            model = treeview.get_model()
+            text = model[path][1]  # Get transcript text
+
+            # Copy to clipboard
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_text(text, -1)
+
+            # Show feedback
+            dialog = Gtk.MessageDialog(
+                parent=self,
+                flags=Gtk.DialogFlags.MODAL,
+                type=Gtk.MessageType.INFO,
+                buttons=Gtk.ButtonsType.OK,
+                message_format="Transcript copied to clipboard",
+            )
+            dialog.run()
+            dialog.destroy()
+            return True
+
+        return False
+
+
 class WhisperIndicatorApp:
     """Main application class for the Whisper indicator.
 
@@ -268,6 +372,11 @@ class WhisperIndicatorApp:
         settings_item = Gtk.MenuItem(label="Settings")
         settings_item.connect("activate", self.show_settings)
         self.menu.append(settings_item)
+
+        # Add Transcript History item
+        history_item = Gtk.MenuItem(label="Transcript History")
+        history_item.connect("activate", self.show_transcript_history)
+        self.menu.append(history_item)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
@@ -629,6 +738,12 @@ class WhisperIndicatorApp:
 
         self.settings_dialog.destroy()
         self.settings_dialog = None
+
+    def show_transcript_history(self, widget) -> None:
+        """Show the transcript history dialog."""
+        dialog = TranscriptViewerDialog(None, self.transcript_path)
+        dialog.run()
+        dialog.destroy()
 
     def run(self) -> None:
         """Start the application main loop."""
