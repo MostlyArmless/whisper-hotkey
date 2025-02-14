@@ -107,8 +107,14 @@ class SettingsDialog(Gtk.Dialog):
         row += 1
         grid.attach(Gtk.Label(label="Hotkey:"), 0, row, 1, 1)
         self.hotkey_entry = Gtk.Entry()
-        self.hotkey_entry.set_text(config["hotkey"]["combination"])
+        self.hotkey_entry.set_text(config["hotkey"]["mic_only"])
         grid.attach(self.hotkey_entry, 1, row, 1, 1)
+
+        row += 1
+        grid.attach(Gtk.Label(label="Mic and Output Hotkey:"), 0, row, 1, 1)
+        self.mic_and_output_entry = Gtk.Entry()
+        self.mic_and_output_entry.set_text(config["hotkey"]["mic_and_output"])
+        grid.attach(self.mic_and_output_entry, 1, row, 1, 1)
 
         row += 1
         grid.attach(Gtk.Label(label="Max Recording Duration (seconds):"), 0, row, 1, 1)
@@ -200,7 +206,8 @@ class SettingsDialog(Gtk.Dialog):
         """Save the settings to the config.ini file."""
         self.config["server"]["host"] = self.host_entry.get_text()
         self.config["server"]["port"] = self.port_entry.get_text()
-        self.config["hotkey"]["combination"] = self.hotkey_entry.get_text()
+        self.config["hotkey"]["mic_only"] = self.hotkey_entry.get_text()
+        self.config["hotkey"]["mic_and_output"] = self.mic_and_output_entry.get_text()
         self.config["recording"]["max_duration"] = self.duration_entry.get_text()
 
         config_path = Path.home() / ".config" / "whisper-client" / "config.ini"
@@ -210,7 +217,8 @@ class SettingsDialog(Gtk.Dialog):
     def restore_defaults(self, button):
         """Restore default settings values for port, hotkey and duration."""
         self.port_entry.set_text("43007")
-        self.hotkey_entry.set_text("<Ctrl><Alt>R")
+        self.mic_only_hotkey_entry.set_text("<Ctrl><Alt>R")
+        self.mic_and_output_hotkey_entry.set_text("<Ctrl><Alt>E")
         self.duration_entry.set_text("60")
 
 
@@ -381,7 +389,8 @@ class WhisperIndicatorApp:
     def __init__(self):
         Gtk.init(None)
         self.config = Config.load()
-        self.hotkey = self.config["hotkey"]["combination"]
+        self.mic_hotkey = self.config["hotkey"]["mic_only"]
+        self.mic_and_output_hotkey = self.config["hotkey"]["mic_and_output"]
         self.settings_dialog = None  # Add this line to track the dialog instance
 
         self.init_state()
@@ -399,8 +408,8 @@ class WhisperIndicatorApp:
         - File paths and settings
         """
         self.is_recording = False
-        self.audio_proc: Optional[subprocess.Popen] = None
-        self.nc_proc: Optional[subprocess.Popen] = None
+        self.audio_process_for_mic_transcription: Optional[subprocess.Popen] = None
+        self.netcat_process: Optional[subprocess.Popen] = None
         self.text_queue: queue.Queue = queue.Queue()
         self.seen_segments: Set[str] = set()
         self.recording_start_time: Optional[float] = None
@@ -411,6 +420,11 @@ class WhisperIndicatorApp:
         self.max_recording_duration = int(self.config["recording"]["max_duration"])
         self.current_session_text = []
         self.session_start_time = None
+        self.recording_path = Path.home() / "whisper-recordings"
+        self.recording_path.mkdir(parents=True, exist_ok=True)
+        self.audio_process_for_recording_mic_and_output: Optional[subprocess.Popen] = (
+            None
+        )
 
     def init_ui(self) -> None:
         """Initialize UI components."""
@@ -422,8 +436,9 @@ class WhisperIndicatorApp:
         """Set up status message templates."""
         self.labels = {
             "recording_error": "🚫 Recording Error",
-            "recording": f"🔴 Recording (Press {self.hotkey} to stop)",
-            "ready": f"🎙️ Ready (Press {self.hotkey} to start)",
+            "recording_mic_only": f"🔴 Recording Mic Only (Press {self.mic_hotkey} to stop)",
+            "recording_mic_and_output": f"🔴 Recording Mic and Output (Press {self.mic_and_output_hotkey} to stop)",
+            "ready": "🎙️ Ready",
             "server_error": "❌ Server Unavailable",
         }
 
@@ -449,8 +464,16 @@ class WhisperIndicatorApp:
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # Toggle recording item
-        toggle_item = Gtk.MenuItem(label="Toggle Recording")
-        toggle_item.connect("activate", self.toggle_recording)
+        toggle_item = Gtk.MenuItem(
+            label=f"Toggle Mic Transcribe+Type ({self.mic_hotkey})"
+        )
+        toggle_item.connect("activate", self.toggle_recording_mic_only)
+        self.menu.append(toggle_item)
+
+        toggle_item = Gtk.MenuItem(
+            label=f"Toggle Mic and Output Recording ({self.mic_and_output_hotkey})"
+        )
+        toggle_item.connect("activate", self.toggle_recording_mic_and_output)
         self.menu.append(toggle_item)
 
         # Add Settings item
@@ -480,7 +503,8 @@ class WhisperIndicatorApp:
     def init_keybinding(self) -> None:
         """Initialize global hotkey binding."""
         Keybinder.init()
-        Keybinder.bind(self.hotkey, self.toggle_recording)
+        Keybinder.bind(self.mic_hotkey, self.toggle_recording_mic_only)
+        Keybinder.bind(self.mic_and_output_hotkey, self.toggle_recording_mic_and_output)
 
     def setup_timers(self) -> None:
         """Set up periodic tasks."""
@@ -556,12 +580,19 @@ class WhisperIndicatorApp:
         base_text = current_text.split(" (Server Last seen:")[0]
         self.status_item.set_label(f"{base_text} (Server Last seen: {time_text})")
 
-    def toggle_recording(self, *args) -> None:
-        """Toggle recording state."""
+    def toggle_recording_mic_only(self, *args) -> None:
+        """Toggle recording of mic only."""
         if not self.is_recording:
             self.start_recording_session()
         else:
-            self.stop_recording_session()
+            self.stop_mic_recording_session()
+
+    def toggle_recording_mic_and_output(self, *args) -> None:
+        """Toggle recording of both microphone and system audio."""
+        if not self.audio_process_for_recording_mic_and_output:
+            self.start_mic_and_output_recording()
+        else:
+            self.stop_mic_and_output_recording()
 
     def start_recording_session(self) -> None:
         """Start a new recording session."""
@@ -582,8 +613,8 @@ class WhisperIndicatorApp:
             self.indicator.set_label("", "")
             self.update_status(self.labels["recording_error"])
 
-    def stop_recording_session(self) -> None:
-        """Stop the current recording session."""
+    def stop_mic_recording_session(self) -> None:
+        """Stop the current mic-only recording session."""
         if self.current_session_text:
             self.save_session_transcript()
         self.is_recording = False
@@ -603,7 +634,7 @@ class WhisperIndicatorApp:
         3. Creates a thread to read the server's responses
         """
         try:
-            self.audio_proc = subprocess.Popen(
+            self.audio_process_for_mic_transcription = subprocess.Popen(
                 [
                     "arecord",
                     "-f",  # Format:
@@ -620,16 +651,16 @@ class WhisperIndicatorApp:
                 preexec_fn=os.setsid,
             )
 
-            self.nc_proc = subprocess.Popen(
+            self.netcat_process = subprocess.Popen(
                 ["nc", self.config["server"]["host"], self.config["server"]["port"]],
-                stdin=self.audio_proc.stdout,
+                stdin=self.audio_process_for_mic_transcription.stdout,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid,
             )
 
-            if self.audio_proc.stdout:
-                self.audio_proc.stdout.close()
+            if self.audio_process_for_mic_transcription.stdout:
+                self.audio_process_for_mic_transcription.stdout.close()
 
             self.read_thread = threading.Thread(target=self.read_output)
             self.read_thread.daemon = True
@@ -652,9 +683,9 @@ class WhisperIndicatorApp:
 
         This method parses these lines and queues the text for typing.
         """
-        while self.is_recording and self.nc_proc and self.nc_proc.stdout:
+        while self.is_recording and self.netcat_process and self.netcat_process.stdout:
             try:
-                line = self.nc_proc.stdout.readline().decode().strip()
+                line = self.netcat_process.stdout.readline().decode().strip()
                 if not line:
                     continue
 
@@ -757,7 +788,7 @@ class WhisperIndicatorApp:
 
         if self.recording_duration >= self.max_recording_duration:
             # Stop the timer, toggle recording, and play a beep sound to indicate the end of the recording
-            GLib.idle_add(self.toggle_recording)
+            GLib.idle_add(self.toggle_recording_mic_only)
             subprocess.run(
                 ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"]
             )
@@ -767,20 +798,43 @@ class WhisperIndicatorApp:
 
     def cleanup_recording(self) -> None:
         """Clean up recording processes."""
-        for proc_name, proc in [("audio", self.audio_proc), ("network", self.nc_proc)]:
+        for proc_name, proc in [
+            ("audio", self.audio_process_for_mic_transcription),
+            ("network", self.netcat_process),
+        ]:
             if proc:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 except Exception as e:
                     print(f"Error killing {proc_name} process: {e}")
 
-        self.audio_proc = None
-        self.nc_proc = None
+        self.audio_process_for_mic_transcription = None
+        self.netcat_process = None
 
     def cleanup_and_quit(self, *args) -> bool:
         """Clean up and quit the application."""
         self.is_recording = False
         self.cleanup_recording()
+        self.stop_mic_recording_session()
+        self.stop_mic_and_output_recording()
+
+        # Clean up any temporary files that might exist
+        if hasattr(self, "current_recording_timestamp"):
+            try:
+                mic_file = (
+                    self.recording_path / f"{self.current_recording_timestamp}_mic.wav"
+                )
+                output_file = (
+                    self.recording_path
+                    / f"{self.current_recording_timestamp}_output.wav"
+                )
+                if mic_file.exists():
+                    mic_file.unlink()
+                if output_file.exists():
+                    output_file.unlink()
+            except Exception as e:
+                print(f"Error cleaning up temporary files: {e}")
+
         if hasattr(self, "server_check_timer"):
             GLib.source_remove(self.server_check_timer)
         Gtk.main_quit()
@@ -810,10 +864,15 @@ class WhisperIndicatorApp:
             if response == Gtk.ResponseType.OK:
                 if self.settings_dialog.validate():
                     self.settings_dialog.save_settings()
-                    # Rebind hotkey with new combination
-                    Keybinder.unbind(self.hotkey)
-                    self.hotkey = self.config["hotkey"]["combination"]
-                    Keybinder.bind(self.hotkey, self.toggle_recording)
+                    # Rebind hotkeys with new combination
+                    Keybinder.unbind(self.mic_hotkey)
+                    self.mic_hotkey = self.config["hotkey"]["mic_only"]
+                    Keybinder.bind(self.mic_hotkey, self.toggle_recording_mic_only)
+                    Keybinder.unbind(self.mic_and_output_hotkey)
+                    self.mic_and_output_hotkey = self.config["hotkey"]["mic_and_output"]
+                    Keybinder.bind(
+                        self.mic_and_output_hotkey, self.toggle_recording_mic_and_output
+                    )
                     # Update max recording duration
                     self.max_recording_duration = int(
                         self.config["recording"]["max_duration"]
@@ -834,6 +893,192 @@ class WhisperIndicatorApp:
         dialog = TranscriptViewerDialog(None, self.transcript_path)
         dialog.run()
         dialog.destroy()
+
+    def start_mic_and_output_recording(self) -> None:
+        """Start recording both microphone and system audio output to separate files."""
+        try:
+            print("Starting mic and output recording...")
+            self.current_recording_timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            mic_file = (
+                self.recording_path / f"{self.current_recording_timestamp}_mic.wav"
+            )
+            output_file = (
+                self.recording_path / f"{self.current_recording_timestamp}_output.wav"
+            )
+
+            print(f"Recording to: {mic_file} and {output_file}")
+
+            # Start two separate ffmpeg processes
+            mic_cmd = [
+                "ffmpeg",
+                "-f",
+                "pulse",
+                "-i",
+                "default",
+                "-ac",
+                "1",  # Mono for mic
+                str(mic_file),
+            ]
+
+            output_cmd = [
+                "ffmpeg",
+                "-f",
+                "pulse",
+                "-i",
+                "$(pactl get-default-sink).monitor",  # This might be the issue - shell expansion
+                "-ac",
+                "1",  # Mono for system audio
+                str(output_file),
+            ]
+
+            print(f"Starting mic recording: {' '.join(mic_cmd)}")
+            # Start both recording processes with stderr redirected to stdout
+            self.mic_recording_proc = subprocess.Popen(
+                mic_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Redirect stderr to stdout
+                preexec_fn=os.setsid,
+            )
+
+            # Get the actual sink monitor name
+            sink_monitor = (
+                subprocess.check_output(
+                    ["pactl", "get-default-sink"], text=True
+                ).strip()
+                + ".monitor"
+            )
+
+            output_cmd = [
+                "ffmpeg",
+                "-f",
+                "pulse",
+                "-i",
+                sink_monitor,
+                "-ac",
+                "1",
+                str(output_file),
+            ]
+
+            print(f"Starting output recording: {' '.join(output_cmd)}")
+            self.output_recording_proc = subprocess.Popen(
+                output_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Redirect stderr to stdout
+                preexec_fn=os.setsid,
+            )
+
+            # Start threads to monitor ffmpeg output
+            threading.Thread(
+                target=self.monitor_process_output,
+                args=(self.mic_recording_proc, "mic ffmpeg"),
+                daemon=True,
+            ).start()
+            threading.Thread(
+                target=self.monitor_process_output,
+                args=(self.output_recording_proc, "output ffmpeg"),
+                daemon=True,
+            ).start()
+
+            self.audio_process_for_recording_mic_and_output = True  # Use as flag
+            self.is_recording = True  # Add this line
+            self.update_status(self.labels["recording_mic_and_output"])
+            print("Recording started successfully")
+
+        except Exception as e:
+            print(f"Error starting mic+output audio recording: {e}")
+            self.is_recording = False  # Add this line
+            self.cleanup_recording_processes()
+
+    def monitor_process_output(self, process: subprocess.Popen, name: str) -> None:
+        """Monitor and log output from a subprocess."""
+        try:
+            while True:
+                if process.stdout:
+                    line = process.stdout.readline()
+                    if not line:
+                        break
+                    print(f"{name}: {line.decode().strip()}")
+        except Exception as e:
+            print(f"Error monitoring {name}: {e}")
+
+    def stop_mic_and_output_recording(self) -> None:
+        """Stop recording and combine the audio files with normalization."""
+        if self.audio_process_for_recording_mic_and_output:
+            try:
+                # Stop recording processes
+                self.cleanup_recording_processes()
+                time.sleep(0.5)
+
+                # Combine files with normalization and mixing
+                mic_file = (
+                    self.recording_path / f"{self.current_recording_timestamp}_mic.wav"
+                )
+                output_file = (
+                    self.recording_path
+                    / f"{self.current_recording_timestamp}_output.wav"
+                )
+                final_file = (
+                    self.recording_path
+                    / f"{self.current_recording_timestamp}_combined.wav"
+                )
+
+                # More explicit ffmpeg command with format specifications
+                combine_cmd = [
+                    "ffmpeg",
+                    "-i",
+                    str(mic_file),
+                    "-i",
+                    str(output_file),
+                    "-filter_complex",
+                    "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=mono[a0];"
+                    "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=mono[a1];"
+                    "[a0]volume=1.5[v0];[a1]volume=0.8[v1];"
+                    "[v0][v1]amerge=inputs=2,pan=stereo|c0=c0|c1=c1[aout]",
+                    "-map",
+                    "[aout]",
+                    str(final_file),
+                ]
+
+                print(f"Running combine command: {' '.join(combine_cmd)}")
+
+                # Run ffmpeg and capture both stdout and stderr
+                process = subprocess.Popen(
+                    combine_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+                stdout, stderr = process.communicate()
+                if process.returncode != 0:
+                    print(f"FFmpeg stdout: {stdout}")
+                    print(f"FFmpeg stderr: {stderr}")
+                    raise subprocess.CalledProcessError(
+                        process.returncode, combine_cmd, stdout, stderr
+                    )
+
+                print("Successfully combined audio files")
+
+                # Clean up temporary files only if combine was successful
+                mic_file.unlink()
+                output_file.unlink()
+
+            except Exception as e:
+                print(f"Error stopping and combining audio recording: {e}")
+                # Don't delete temp files if combine failed
+            finally:
+                self.is_recording = False
+                self.audio_process_for_recording_mic_and_output = None
+                self.update_status(self.labels["ready"])
+
+    def cleanup_recording_processes(self) -> None:
+        """Helper to clean up recording processes."""
+        if hasattr(self, "mic_recording_proc") and self.mic_recording_proc:
+            os.killpg(os.getpgid(self.mic_recording_proc.pid), signal.SIGTERM)
+            self.mic_recording_proc = None
+        if hasattr(self, "output_recording_proc") and self.output_recording_proc:
+            os.killpg(os.getpgid(self.output_recording_proc.pid), signal.SIGTERM)
+            self.output_recording_proc = None
 
     def run(self) -> None:
         """Start the application main loop."""
