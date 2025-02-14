@@ -467,7 +467,7 @@ class WhisperIndicatorApp:
         toggle_item = Gtk.MenuItem(
             label=f"Toggle Mic Transcribe+Type ({self.mic_hotkey})"
         )
-        toggle_item.connect("activate", self.toggle_recording_mic_only)
+        toggle_item.connect("activate", self.toggle_mic_transcription)
         self.menu.append(toggle_item)
 
         toggle_item = Gtk.MenuItem(
@@ -503,7 +503,7 @@ class WhisperIndicatorApp:
     def init_keybinding(self) -> None:
         """Initialize global hotkey binding."""
         Keybinder.init()
-        Keybinder.bind(self.mic_hotkey, self.toggle_recording_mic_only)
+        Keybinder.bind(self.mic_hotkey, self.toggle_mic_transcription)
         Keybinder.bind(self.mic_and_output_hotkey, self.toggle_recording_mic_and_output)
 
     def setup_timers(self) -> None:
@@ -539,7 +539,7 @@ class WhisperIndicatorApp:
             if not self.is_recording:
                 self.update_status(self.labels["server_error"])
 
-        self.update_connection_time()
+        self.update_server_last_connection_time_label()
         return True
 
     def update_status(self, text: str) -> None:
@@ -566,7 +566,7 @@ class WhisperIndicatorApp:
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
-    def update_connection_time(self) -> None:
+    def update_server_last_connection_time_label(self) -> None:
         """Update the status text with time since last connection."""
         elapsed = time.time() - self.last_successful_connection
         if elapsed < 60:
@@ -580,12 +580,12 @@ class WhisperIndicatorApp:
         base_text = current_text.split(" (Server Last seen:")[0]
         self.status_item.set_label(f"{base_text} (Server Last seen: {time_text})")
 
-    def toggle_recording_mic_only(self, *args) -> None:
-        """Toggle recording of mic only."""
+    def toggle_mic_transcription(self, *args) -> None:
+        """Toggle recording + transcription of mic."""
         if not self.is_recording:
-            self.start_recording_session()
+            self.start_mic_recording_for_transcription()
         else:
-            self.stop_mic_recording_session()
+            self.stop_mic_recording_for_transcription()
 
     def toggle_recording_mic_and_output(self, *args) -> None:
         """Toggle recording of both microphone and system audio."""
@@ -594,14 +594,14 @@ class WhisperIndicatorApp:
         else:
             self.stop_mic_and_output_recording()
 
-    def start_recording_session(self) -> None:
+    def start_mic_recording_for_transcription(self) -> None:
         """Start a new recording session."""
         self.is_recording = True
         self.seen_segments.clear()
         self.current_session_text = []
         self.session_start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
-        if self.start_recording_processes():
+        if self.start_mic_recording_and_streaming_processes():
             self.recording_duration = 0
             self.recording_start_time = time.time()
             self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
@@ -613,7 +613,7 @@ class WhisperIndicatorApp:
             self.indicator.set_label("", "")
             self.update_status(self.labels["recording_error"])
 
-    def stop_mic_recording_session(self) -> None:
+    def stop_mic_recording_for_transcription(self) -> None:
         """Stop the current mic-only recording session."""
         if self.current_session_text:
             self.save_session_transcript()
@@ -625,7 +625,7 @@ class WhisperIndicatorApp:
         self.indicator.set_label("", "")
         self.update_status(self.labels["ready"])
 
-    def start_recording_processes(self) -> bool:
+    def start_mic_recording_and_streaming_processes(self) -> bool:
         """Start the recording and network processes.
 
         This method:
@@ -667,7 +667,7 @@ class WhisperIndicatorApp:
             self.read_thread.start()
 
             self.last_successful_connection = time.time()
-            self.update_connection_time()
+            self.update_server_last_connection_time_label()
             return True
 
         except Exception as e:
@@ -788,7 +788,7 @@ class WhisperIndicatorApp:
 
         if self.recording_duration >= self.max_recording_duration:
             # Stop the timer, toggle recording, and play a beep sound to indicate the end of the recording
-            GLib.idle_add(self.toggle_recording_mic_only)
+            GLib.idle_add(self.toggle_mic_transcription)
             subprocess.run(
                 ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"]
             )
@@ -815,7 +815,7 @@ class WhisperIndicatorApp:
         """Clean up and quit the application."""
         self.is_recording = False
         self.cleanup_recording()
-        self.stop_mic_recording_session()
+        self.stop_mic_recording_for_transcription()
         self.stop_mic_and_output_recording()
 
         # Clean up any temporary files that might exist
@@ -867,7 +867,7 @@ class WhisperIndicatorApp:
                     # Rebind hotkeys with new combination
                     Keybinder.unbind(self.mic_hotkey)
                     self.mic_hotkey = self.config["hotkey"]["mic_only"]
-                    Keybinder.bind(self.mic_hotkey, self.toggle_recording_mic_only)
+                    Keybinder.bind(self.mic_hotkey, self.toggle_mic_transcription)
                     Keybinder.unbind(self.mic_and_output_hotkey)
                     self.mic_and_output_hotkey = self.config["hotkey"]["mic_and_output"]
                     Keybinder.bind(
