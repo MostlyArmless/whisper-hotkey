@@ -414,8 +414,9 @@ class WhisperIndicatorApp:
         self.seen_segments: Set[str] = set()
         self.recording_start_time: Optional[float] = None
         self.recording_duration = 0
-        self.last_successful_connection = time.time()
-        self.timer_id: Optional[int] = None
+        self.server_last_seen_at = time.time()
+        # Used to periodically update the recording duration in the toolbar:
+        self.timer_id_for_gui_updates: Optional[int] = None
         self.transcript_path = Path.home() / "whisper-transcript.json"
         self.max_recording_duration = int(self.config["recording"]["max_duration"])
         self.current_session_text = []
@@ -528,7 +529,7 @@ class WhisperIndicatorApp:
             sock.close()
 
             if result == 0:
-                self.last_successful_connection = time.time()
+                self.server_last_seen_at = time.time()
                 if not self.is_recording:
                     self.update_status(self.labels["ready"])
             elif not self.is_recording:
@@ -568,7 +569,7 @@ class WhisperIndicatorApp:
 
     def update_server_last_connection_time_label(self) -> None:
         """Update the status text with time since last connection."""
-        elapsed = time.time() - self.last_successful_connection
+        elapsed = time.time() - self.server_last_seen_at
         if elapsed < 60:
             time_text = f"{int(elapsed)}s ago"
         elif elapsed < 3600:
@@ -605,9 +606,8 @@ class WhisperIndicatorApp:
             self.recording_duration = 0
             self.recording_start_time = time.time()
             self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
-            self.timer_id = GLib.timeout_add(1000, self.update_timer)
+            self.timer_id_for_gui_updates = GLib.timeout_add(1000, self.update_timer)
             self.update_status(self.labels["transcribing"])
-            GLib.timeout_add(100, self.process_text_queue)
         else:
             self.is_recording = False
             self.indicator.set_label("", "")
@@ -619,9 +619,9 @@ class WhisperIndicatorApp:
             self.save_session_transcript()
         self.is_recording = False
         self.kill_transcription_processes()
-        if self.timer_id:
-            GLib.source_remove(self.timer_id)
-            self.timer_id = None
+        if self.timer_id_for_gui_updates:
+            GLib.source_remove(self.timer_id_for_gui_updates)
+            self.timer_id_for_gui_updates = None
         self.indicator.set_label("", "")
         self.update_status(self.labels["ready"])
 
@@ -666,7 +666,7 @@ class WhisperIndicatorApp:
             self.read_thread.daemon = True
             self.read_thread.start()
 
-            self.last_successful_connection = time.time()
+            self.server_last_seen_at = time.time()
             self.update_server_last_connection_time_label()
             return True
 
