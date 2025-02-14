@@ -1005,67 +1005,9 @@ class WhisperIndicatorApp:
         """Stop recording and combine the audio files with normalization."""
         if self.audio_process_for_recording_mic_and_output:
             try:
-                # Stop recording processes
                 self.cleanup_recording_processes()
-                time.sleep(0.5)
-
-                # Combine files with normalization and mixing
-                mic_file = (
-                    self.recording_path / f"{self.current_recording_timestamp}_mic.wav"
-                )
-                output_file = (
-                    self.recording_path
-                    / f"{self.current_recording_timestamp}_output.wav"
-                )
-                final_file = (
-                    self.recording_path
-                    / f"{self.current_recording_timestamp}_combined.wav"
-                )
-
-                # More explicit ffmpeg command with format specifications
-                combine_cmd = [
-                    "ffmpeg",
-                    "-i",
-                    str(mic_file),
-                    "-i",
-                    str(output_file),
-                    "-filter_complex",
-                    "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=mono[a0];"
-                    "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=mono[a1];"
-                    "[a0]volume=1.5[v0];[a1]volume=0.8[v1];"
-                    "[v0][v1]amerge=inputs=2,pan=stereo|c0=c0|c1=c1[aout]",
-                    "-map",
-                    "[aout]",
-                    str(final_file),
-                ]
-
-                print(f"Running combine command: {' '.join(combine_cmd)}")
-
-                # Run ffmpeg and capture both stdout and stderr
-                process = subprocess.Popen(
-                    combine_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-
-                stdout, stderr = process.communicate()
-                if process.returncode != 0:
-                    print(f"FFmpeg stdout: {stdout}")
-                    print(f"FFmpeg stderr: {stderr}")
-                    raise subprocess.CalledProcessError(
-                        process.returncode, combine_cmd, stdout, stderr
-                    )
-
-                print("Successfully combined audio files")
-
-                # Clean up temporary files only if combine was successful
-                mic_file.unlink()
-                output_file.unlink()
-
             except Exception as e:
-                print(f"Error stopping and combining audio recording: {e}")
-                # Don't delete temp files if combine failed
+                print(f"Error stopping audio recording: {e}")
             finally:
                 self.is_recording = False
                 self.audio_process_for_recording_mic_and_output = None
