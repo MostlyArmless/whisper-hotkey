@@ -24,18 +24,43 @@ chmod +x install.sh
 ./install.sh
 ```
 
-You should now see a microphone icon appear in your toolbar. Click on it to open the GUI, where you can see the current status of the whisper client, and change the hotkey and the whisper server IP address and port number.
+You should now see a microphone icon appear in your toolbar. Click on it to open the menu, which provides several options:
 
-### Modify config.ini file to point to the correct whisper server
+- Toggle Recording: Start/stop transcription (same as using the hotkey)
+- Settings: Configure server connection, hotkey, and recording duration
+- Transcript History: View and copy previous transcriptions
+- Restart/Quit Service: Control the whisper-client service
 
-```bash
-nano ~/.config/whisper-client/config.ini
-# Modify the `server` field to point to the your whisper server IP address and port number, if not already set correctly
-```
+## Configuration
 
-## Run
+All settings can be configured through the Settings dialog in the menu:
 
-The service should automatically start when you log into Ubuntu. To start audio transcription, just hit the hotkey which is `Ctrl+Alt+R` by default. The text will be typed into whatever app you have focused at the current cursor position. All transcribed text will be saved to `~/whisper-transcript.txt`, regardless of whether it is successfully typed into a target application or not, so you can always refer back to it later.
+- Whisper server IP address and port number
+- Hotkey combination (default: Ctrl+Alt+R)
+- Maximum recording duration in seconds (default: 60)
+
+## Usage
+
+The service automatically starts when you log into Ubuntu. To start audio transcription:
+
+1. Press the hotkey (default: Ctrl+Alt+R) or use the menu's Toggle Recording option
+2. Speak into your microphone
+3. The transcribed text will appear at your cursor position
+4. Press the hotkey again to stop recording, or let it stop automatically after the configured duration
+
+The toolbar icon shows:
+- Recording status and duration (e.g., "12/60s" while recording)
+- Server connection status
+- Time since last server contact
+
+## Transcripts
+
+All transcribed text is automatically saved and can be accessed through the Transcript History option in the menu. The history viewer shows:
+- Timestamps for each recording session
+- Full text of each transcription
+- Copy buttons to easily copy any transcript to the clipboard
+
+Transcripts are stored in `~/whisper-transcript.json` for future reference, even if they weren't successfully typed into an application.
 
 ## Troubleshooting
 
@@ -46,8 +71,5 @@ To restart the service run `systemctl --user restart whisper-client.service`.
 
 ## Feature wishlist
 
-* Make it so that the hotkey can be changed in the GUI.
-* Add a button to the dropdown menu which will open a list of all recent transcriptions, and allow you to copy one of them to the clipboard.
-  * This will be useful for when the transcribed text is not successfully typed into the target application.
 * Automatically detect when there is no valid microphone connected and disable the microphone icon and hotkey.
   * The icon should change to the "no microphone" icon.
