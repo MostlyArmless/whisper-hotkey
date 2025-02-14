@@ -407,8 +407,7 @@ class WhisperIndicatorApp:
         - Timers and durations
         - File paths and settings
         """
-        self.is_recording_mic_for_transcription = False
-        self.is_recording_mic_and_output = False
+        self.is_recording = False
         self.audio_process_for_mic_transcription: Optional[subprocess.Popen] = None
         self.netcat_process: Optional[subprocess.Popen] = None
         self.text_queue: queue.Queue = queue.Queue()
@@ -530,14 +529,14 @@ class WhisperIndicatorApp:
 
             if result == 0:
                 self.last_successful_connection = time.time()
-                if not self.is_recording_mic_for_transcription:
+                if not self.is_recording:
                     self.update_status(self.labels["ready"])
-            elif not self.is_recording_mic_for_transcription:
+            elif not self.is_recording:
                 self.update_status(self.labels["server_error"])
 
         except Exception as e:
             print(f"Server check error: {e}")
-            if not self.is_recording_mic_for_transcription:
+            if not self.is_recording:
                 self.update_status(self.labels["server_error"])
 
         self.update_server_last_connection_time_label()
@@ -583,7 +582,7 @@ class WhisperIndicatorApp:
 
     def toggle_mic_transcription(self, *args) -> None:
         """Toggle recording + transcription of mic."""
-        if not self.is_recording_mic_for_transcription:
+        if not self.is_recording:
             self.start_mic_recording_for_transcription()
         else:
             self.stop_mic_recording_for_transcription()
@@ -597,7 +596,7 @@ class WhisperIndicatorApp:
 
     def start_mic_recording_for_transcription(self) -> None:
         """Start a new recording session."""
-        self.is_recording_mic_for_transcription = True
+        self.is_recording = True
         self.seen_segments.clear()
         self.current_session_text = []
         self.session_start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -610,7 +609,7 @@ class WhisperIndicatorApp:
             self.update_status(self.labels["transcribing"])
             GLib.timeout_add(100, self.process_text_queue)
         else:
-            self.is_recording_mic_for_transcription = False
+            self.is_recording = False
             self.indicator.set_label("", "")
             self.update_status(self.labels["recording_error"])
 
@@ -618,7 +617,7 @@ class WhisperIndicatorApp:
         """Stop the current mic-only recording session."""
         if self.current_session_text:
             self.save_session_transcript()
-        self.is_recording_mic_for_transcription = False
+        self.is_recording = False
         self.cleanup_recording()
         if self.timer_id:
             GLib.source_remove(self.timer_id)
@@ -684,11 +683,7 @@ class WhisperIndicatorApp:
 
         This method parses these lines and queues the text for typing.
         """
-        while (
-            self.is_recording_mic_for_transcription
-            and self.netcat_process
-            and self.netcat_process.stdout
-        ):
+        while self.is_recording and self.netcat_process and self.netcat_process.stdout:
             try:
                 line = self.netcat_process.stdout.readline().decode().strip()
                 if not line:
@@ -731,7 +726,7 @@ class WhisperIndicatorApp:
                 self.text_queue.task_done()
         except queue.Empty:
             pass
-        return self.is_recording_mic_for_transcription
+        return self.is_recording
 
     def type_text(self, text: str) -> bool:
         """Type the text and save to transcript."""
@@ -778,7 +773,7 @@ class WhisperIndicatorApp:
 
     def update_timer(self) -> bool:
         """Update the recording timer display."""
-        if not self.is_recording_mic_for_transcription:
+        if not self.is_recording:
             return False
 
         if self.recording_start_time is not None:
@@ -818,7 +813,7 @@ class WhisperIndicatorApp:
 
     def cleanup_and_quit(self, *args) -> bool:
         """Clean up and quit the application."""
-        self.is_recording_mic_for_transcription = False
+        self.is_recording = False
         self.cleanup_recording()
         self.stop_mic_recording_for_transcription()
         self.stop_mic_and_output_recording()
@@ -984,14 +979,14 @@ class WhisperIndicatorApp:
                 daemon=True,
             ).start()
 
-            self.is_recording_mic_and_output = True
-            self.is_recording_mic_for_transcription = True
+            self.audio_process_for_recording_mic_and_output = True  # Use as flag
+            self.is_recording = True  # Add this line
             self.update_status(self.labels["recording_mic_and_output"])
             print("Recording started successfully")
 
         except Exception as e:
             print(f"Error starting mic+output audio recording: {e}")
-            self.is_recording_mic_for_transcription = False
+            self.is_recording = False  # Add this line
             self.cleanup_recording_processes()
 
     def monitor_process_output(self, process: subprocess.Popen, name: str) -> None:
@@ -1008,7 +1003,7 @@ class WhisperIndicatorApp:
 
     def stop_mic_and_output_recording(self) -> None:
         """Stop recording and combine the audio files with normalization."""
-        if self.is_recording_mic_and_output:
+        if self.audio_process_for_recording_mic_and_output:
             try:
                 # Stop recording processes
                 self.cleanup_recording_processes()
@@ -1072,8 +1067,7 @@ class WhisperIndicatorApp:
                 print(f"Error stopping and combining audio recording: {e}")
                 # Don't delete temp files if combine failed
             finally:
-                self.is_recording_mic_for_transcription = False
-                self.is_recording_mic_and_output = False
+                self.is_recording = False
                 self.audio_process_for_recording_mic_and_output = None
                 self.update_status(self.labels["ready"])
 
