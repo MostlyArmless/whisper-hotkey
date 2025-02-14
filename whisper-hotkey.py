@@ -391,7 +391,7 @@ class WhisperIndicatorApp:
         self.config = Config.load()
         self.mic_hotkey = self.config["hotkey"]["mic_only"]
         self.mic_and_output_hotkey = self.config["hotkey"]["mic_and_output"]
-        self.settings_dialog = None  # Add this line to track the dialog instance
+        self.settings_dialog = None
 
         self.init_state()
         self.init_ui()
@@ -618,7 +618,7 @@ class WhisperIndicatorApp:
         if self.current_session_text:
             self.save_session_transcript()
         self.is_recording = False
-        self.cleanup_recording()
+        self.kill_transcription_processes()
         if self.timer_id:
             GLib.source_remove(self.timer_id)
             self.timer_id = None
@@ -672,7 +672,7 @@ class WhisperIndicatorApp:
 
         except Exception as e:
             print(f"Error starting recording: {e}")
-            self.cleanup_recording()
+            self.kill_transcription_processes()
             return False
 
     def read_output(self) -> None:
@@ -796,7 +796,7 @@ class WhisperIndicatorApp:
 
         return True
 
-    def cleanup_recording(self) -> None:
+    def kill_transcription_processes(self) -> None:
         """Clean up recording processes."""
         for proc_name, proc in [
             ("audio", self.audio_process_for_mic_transcription),
@@ -813,27 +813,8 @@ class WhisperIndicatorApp:
 
     def cleanup_and_quit(self, *args) -> bool:
         """Clean up and quit the application."""
-        self.is_recording = False
-        self.cleanup_recording()
         self.stop_mic_recording_for_transcription()
         self.stop_mic_and_output_recording()
-
-        # Clean up any temporary files that might exist
-        if hasattr(self, "current_recording_timestamp"):
-            try:
-                mic_file = (
-                    self.recording_path / f"{self.current_recording_timestamp}_mic.wav"
-                )
-                output_file = (
-                    self.recording_path
-                    / f"{self.current_recording_timestamp}_output.wav"
-                )
-                if mic_file.exists():
-                    mic_file.unlink()
-                if output_file.exists():
-                    output_file.unlink()
-            except Exception as e:
-                print(f"Error cleaning up temporary files: {e}")
 
         if hasattr(self, "server_check_timer"):
             GLib.source_remove(self.server_check_timer)
@@ -925,7 +906,7 @@ class WhisperIndicatorApp:
                 "-f",
                 "pulse",
                 "-i",
-                "$(pactl get-default-sink).monitor",  # This might be the issue - shell expansion
+                "$(pactl get-default-sink).monitor",
                 "-ac",
                 "1",  # Mono for system audio
                 str(output_file),
@@ -979,15 +960,15 @@ class WhisperIndicatorApp:
                 daemon=True,
             ).start()
 
-            self.audio_process_for_recording_mic_and_output = True  # Use as flag
-            self.is_recording = True  # Add this line
+            self.audio_process_for_recording_mic_and_output = True
+            self.is_recording = True
             self.update_status(self.labels["recording_mic_and_output"])
             print("Recording started successfully")
 
         except Exception as e:
             print(f"Error starting mic+output audio recording: {e}")
-            self.is_recording = False  # Add this line
-            self.cleanup_recording_processes()
+            self.is_recording = False
+            self.kill_recording_processes()
 
     def monitor_process_output(self, process: subprocess.Popen, name: str) -> None:
         """Monitor and log output from a subprocess."""
@@ -1005,7 +986,7 @@ class WhisperIndicatorApp:
         """Stop recording and combine the audio files with normalization."""
         if self.audio_process_for_recording_mic_and_output:
             try:
-                self.cleanup_recording_processes()
+                self.kill_recording_processes()
             except Exception as e:
                 print(f"Error stopping audio recording: {e}")
             finally:
@@ -1013,7 +994,7 @@ class WhisperIndicatorApp:
                 self.audio_process_for_recording_mic_and_output = None
                 self.update_status(self.labels["ready"])
 
-    def cleanup_recording_processes(self) -> None:
+    def kill_recording_processes(self) -> None:
         """Helper to clean up recording processes."""
         if hasattr(self, "mic_recording_proc") and self.mic_recording_proc:
             os.killpg(os.getpgid(self.mic_recording_proc.pid), signal.SIGTERM)
