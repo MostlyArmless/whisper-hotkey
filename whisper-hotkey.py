@@ -217,8 +217,8 @@ class SettingsDialog(Gtk.Dialog):
     def restore_defaults(self, button):
         """Restore default settings values for port, hotkey and duration."""
         self.port_entry.set_text("43007")
-        self.mic_only_hotkey_entry.set_text("<Ctrl><Alt>R")
-        self.mic_and_output_hotkey_entry.set_text("<Ctrl><Alt>E")
+        self.hotkey_entry.set_text("<Ctrl><Alt>R")
+        self.mic_and_output_entry.set_text("<Ctrl><Alt>E")
         self.duration_entry.set_text("60")
 
 
