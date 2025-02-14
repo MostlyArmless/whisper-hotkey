@@ -436,10 +436,10 @@ class WhisperIndicatorApp:
     def setup_status_labels(self) -> None:
         """Set up status message templates."""
         self.labels = {
-            "recording_error": "🚫 Recording Error",
-            "recording_mic_only": f"🔴 Recording Mic Only (Press {self.mic_hotkey} to stop)",
-            "recording_mic_and_output": f"🔴 Recording Mic and Output (Press {self.mic_and_output_hotkey} to stop)",
             "ready": "🎙️ Ready",
+            "transcribing": f"🔴 Transcribing Mic (Press {self.mic_hotkey} to stop)",
+            "recording_mic_and_output": f"🔴 Recording Mic and Output (Press {self.mic_and_output_hotkey} to stop)",
+            "recording_error": "🚫 Recording Error",
             "server_error": "❌ Server Unavailable",
         }
 
@@ -607,7 +607,7 @@ class WhisperIndicatorApp:
             self.recording_start_time = time.time()
             self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
             self.timer_id = GLib.timeout_add(1000, self.update_timer)
-            self.update_status(self.labels["recording"])
+            self.update_status(self.labels["transcribing"])
             GLib.timeout_add(100, self.process_text_queue)
         else:
             self.is_recording_mic_for_transcription = False
