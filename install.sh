@@ -4,7 +4,7 @@ set -e  # Exit on any error
 
 # Get absolute path to repo directory
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-VENV_DIR="${REPO_DIR}/venv"
+VENV_DIR="${REPO_DIR}/.venv"
 
 echo "Setting up Whisper Hotkey from ${REPO_DIR}..."
 
@@ -13,14 +13,14 @@ echo "Installing system dependencies..."
 sudo apt install -y python3-gi gir1.2-gtk-3.0 python3-keybinder \
     gir1.2-keybinder-3.0 xdotool python3-gi-cairo gir1.2-appindicator3-0.1
 
-# Create and activate venv
-echo "Creating Python virtual environment..."
-python3 -m venv "${VENV_DIR}"
+# Create and activate venv using uv
+echo "Creating Python uv virtual environment..."
+uv init
 source "${VENV_DIR}/bin/activate"
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install -r "${REPO_DIR}/requirements.txt"
+uv sync
 
 # Create systemd user directory if it doesn't exist
 mkdir -p ~/.config/systemd/user/
