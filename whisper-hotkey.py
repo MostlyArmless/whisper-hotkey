@@ -398,6 +398,20 @@ class WhisperIndicatorApp:
         self.init_keybinding()
         self.setup_timers()
 
+    def toggle_mic_transcription(self, *args) -> None:
+        """Toggle recording + transcription of mic."""
+        if not self.is_recording:
+            self.start_mic_recording_for_transcription()
+        else:
+            self.stop_mic_recording_for_transcription()
+
+    def toggle_recording_mic_and_output(self, *args) -> None:
+        """Toggle recording of both microphone and system audio."""
+        if not self.audio_process_for_recording_mic_and_output:
+            self.start_mic_and_output_recording()
+        else:
+            self.stop_mic_and_output_recording()
+
     def init_state(self) -> None:
         """Initialize application state variables.
 
@@ -508,7 +522,8 @@ class WhisperIndicatorApp:
         Keybinder.bind(self.mic_and_output_hotkey, self.toggle_recording_mic_and_output)
 
     def setup_timers(self) -> None:
-        """Set up periodic tasks."""
+        """Set up timers to process text queue and check server status.
+        These timers run regardless of whether the recording is active or not."""
         GLib.timeout_add(100, self.process_text_queue)
         self.server_check_timer = GLib.timeout_add(5000, self.check_server_status)
 
@@ -531,19 +546,19 @@ class WhisperIndicatorApp:
             if result == 0:
                 self.server_last_seen_at = time.time()
                 if not self.is_recording:
-                    self.update_status(self.labels["ready"])
+                    self.update_status_text(self.labels["ready"])
             elif not self.is_recording:
-                self.update_status(self.labels["server_error"])
+                self.update_status_text(self.labels["server_error"])
 
         except Exception as e:
             print(f"Server check error: {e}")
             if not self.is_recording:
-                self.update_status(self.labels["server_error"])
+                self.update_status_text(self.labels["server_error"])
 
         self.update_server_last_connection_time_label()
         return True
 
-    def update_status(self, text: str) -> None:
+    def update_status_text(self, text: str) -> None:
         """Update the status display."""
         self.status_item.set_label(text)
 
@@ -581,20 +596,6 @@ class WhisperIndicatorApp:
         base_text = current_text.split(" (Server Last seen:")[0]
         self.status_item.set_label(f"{base_text} (Server Last seen: {time_text})")
 
-    def toggle_mic_transcription(self, *args) -> None:
-        """Toggle recording + transcription of mic."""
-        if not self.is_recording:
-            self.start_mic_recording_for_transcription()
-        else:
-            self.stop_mic_recording_for_transcription()
-
-    def toggle_recording_mic_and_output(self, *args) -> None:
-        """Toggle recording of both microphone and system audio."""
-        if not self.audio_process_for_recording_mic_and_output:
-            self.start_mic_and_output_recording()
-        else:
-            self.stop_mic_and_output_recording()
-
     def start_mic_recording_for_transcription(self) -> None:
         """Start a new recording session."""
         self.is_recording = True
@@ -606,12 +607,14 @@ class WhisperIndicatorApp:
             self.recording_duration = 0
             self.recording_start_time = time.time()
             self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
-            self.timer_id_for_gui_updates = GLib.timeout_add(1000, self.update_timer)
-            self.update_status(self.labels["transcribing"])
+            self.timer_id_for_gui_updates = GLib.timeout_add(
+                1000, self.update_timer_for_transcription
+            )
+            self.update_status_text(self.labels["transcribing"])
         else:
             self.is_recording = False
             self.indicator.set_label("", "")
-            self.update_status(self.labels["recording_error"])
+            self.update_status_text(self.labels["recording_error"])
 
     def stop_mic_recording_for_transcription(self) -> None:
         """Stop the current mic-only recording session."""
@@ -619,11 +622,16 @@ class WhisperIndicatorApp:
             self.save_session_transcript()
         self.is_recording = False
         self.kill_transcription_processes()
+        self.reset_to_ready_state()
+
+    def reset_to_ready_state(self) -> None:
+        """Cancel the timer for periodically updating the recording duration in the toolbar and reset the indicator label and status text."""
+        self.is_recording = False
         if self.timer_id_for_gui_updates:
             GLib.source_remove(self.timer_id_for_gui_updates)
             self.timer_id_for_gui_updates = None
         self.indicator.set_label("", "")
-        self.update_status(self.labels["ready"])
+        self.update_status_text(self.labels["ready"])
 
     def start_mic_recording_and_streaming_processes(self) -> bool:
         """Start the recording and network processes.
@@ -655,7 +663,7 @@ class WhisperIndicatorApp:
                 ["nc", self.config["server"]["host"], self.config["server"]["port"]],
                 stdin=self.audio_process_for_mic_transcription.stdout,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                # stderr=subprocess.PIPE,
                 preexec_fn=os.setsid,
             )
 
@@ -663,16 +671,14 @@ class WhisperIndicatorApp:
                 self.audio_process_for_mic_transcription.stdout.close()
 
             self.read_thread = threading.Thread(target=self.read_output)
+            # Make it a daemon thread so it doesn't block the main thread from exiting
             self.read_thread.daemon = True
             self.read_thread.start()
-
-            self.server_last_seen_at = time.time()
-            self.update_server_last_connection_time_label()
             return True
 
         except Exception as e:
             print(f"Error starting recording: {e}")
-            self.kill_transcription_processes()
+            self.stop_mic_and_output_recording()
             return False
 
     def read_output(self) -> None:
@@ -771,7 +777,7 @@ class WhisperIndicatorApp:
         except Exception as e:
             print(f"Error saving transcript: {e}")
 
-    def update_timer(self) -> bool:
+    def update_timer_for_transcription(self) -> bool:
         """Update the recording timer display."""
         if not self.is_recording:
             return False
@@ -792,7 +798,26 @@ class WhisperIndicatorApp:
             subprocess.run(
                 ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"]
             )
+            return False  # Don't continue the timer
+
+        return True  # Continue the timer
+
+    def update_timer_for_recording_mic_and_output(self) -> bool:
+        """Update the recording timer display."""
+
+        if not self.is_recording:
+            print("Not recording, returning False")
             return False
+
+        if self.recording_start_time is not None:
+            duration = time.time() - self.recording_start_time
+            print(f"Recording duration: {duration}")
+            self.recording_duration = int(duration)
+        else:
+            print("Recording start time is None, setting duration to 0")
+            self.recording_duration = 0
+
+        self.indicator.set_label(f"{self.recording_duration}s", "")
 
         return True
 
@@ -860,7 +885,7 @@ class WhisperIndicatorApp:
                     )
                     # Update status labels with new hotkey
                     self.setup_status_labels()
-                    self.update_status(self.labels["ready"])
+                    self.update_status_text(self.labels["ready"])
                     break  # Exit loop only if validation succeeds
                 # If validation fails, continue loop to show dialog again
             else:  # CANCEL or dialog closed
@@ -879,12 +904,16 @@ class WhisperIndicatorApp:
         """Start recording both microphone and system audio output to separate files."""
         try:
             print("Starting mic and output recording...")
-            self.current_recording_timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-            mic_file = (
-                self.recording_path / f"{self.current_recording_timestamp}_mic.wav"
+            self.recording_duration = 0
+            self.recording_start_time = time.time()
+            self.indicator.set_label(f"0s", "")
+            self.timer_id_for_gui_updates = GLib.timeout_add(
+                1000, self.update_timer_for_recording_mic_and_output
             )
+            current_recording_timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            mic_file = self.recording_path / f"{current_recording_timestamp}_mic.wav"
             output_file = (
-                self.recording_path / f"{self.current_recording_timestamp}_output.wav"
+                self.recording_path / f"{current_recording_timestamp}_output.wav"
             )
 
             print(f"Recording to: {mic_file} and {output_file}")
@@ -917,7 +946,7 @@ class WhisperIndicatorApp:
             self.mic_recording_proc = subprocess.Popen(
                 mic_cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Redirect stderr to stdout
+                # stderr=subprocess.STDOUT,  # Redirect stderr to stdout
                 preexec_fn=os.setsid,
             )
 
@@ -944,7 +973,7 @@ class WhisperIndicatorApp:
             self.output_recording_proc = subprocess.Popen(
                 output_cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Redirect stderr to stdout
+                # stderr=subprocess.STDOUT,  # Redirect stderr to stdout
                 preexec_fn=os.setsid,
             )
 
@@ -960,9 +989,13 @@ class WhisperIndicatorApp:
                 daemon=True,
             ).start()
 
+            # Used to track if the recording is still running
             self.audio_process_for_recording_mic_and_output = True
             self.is_recording = True
-            self.update_status(self.labels["recording_mic_and_output"])
+            self.timer_id_for_gui_updates = GLib.timeout_add(
+                1000, self.update_timer_for_recording_mic_and_output
+            )
+            self.update_status_text(self.labels["recording_mic_and_output"])
             print("Recording started successfully")
 
         except Exception as e:
@@ -990,9 +1023,8 @@ class WhisperIndicatorApp:
             except Exception as e:
                 print(f"Error stopping audio recording: {e}")
             finally:
-                self.is_recording = False
+                self.reset_to_ready_state()
                 self.audio_process_for_recording_mic_and_output = None
-                self.update_status(self.labels["ready"])
 
     def kill_recording_processes(self) -> None:
         """Helper to clean up recording processes."""
