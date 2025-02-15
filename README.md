@@ -73,3 +73,11 @@ To restart the service run `systemctl --user restart whisper-client.service`.
 
 * Automatically detect when there is no valid microphone connected and disable the microphone icon and hotkey.
   * The icon should change to the "no microphone" icon.
+* Add a new dropdown menu item that opens a new dialog, which should show a table:
+  * col1 = names of the *.wav files in the recording_path
+  * col2 = transcripts of each file (if exist)
+  * col3 = button to transcribe the wav file and add the result to the transcript.
+
+The data for this table should be persisted to recording_path/metadata.json
+We might be able to use the whisper server to do the transcription, but I'm not sure.
+We might have to use whisper proper, in which case I might wanna just do it on the local machine. TBD.
