@@ -35,7 +35,7 @@ After=graphical-session.target
 [Service]
 Type=simple
 Environment=PYTHONPATH=${VENV_DIR}/lib/python3.10/site-packages
-ExecStart=${VENV_DIR}/bin/python ${REPO_DIR}/whisper_hotkey.py
+ExecStart=${VENV_DIR}/bin/python ${REPO_DIR}/src/main.py
 Restart=on-failure
 RestartSec=5
 

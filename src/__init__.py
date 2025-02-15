@@ -1,0 +1,1 @@
+"""Whisper Hotkey package."""
