@@ -396,7 +396,7 @@ class WhisperIndicatorApp:
         self.init_state()
         self.init_ui()
         self.init_keybinding()
-        self.setup_timers()
+        self.set_up_server_status_check_timer()
 
     def toggle_mic_transcription(self, *args) -> None:
         """Toggle recording + transcription of mic."""
@@ -521,10 +521,8 @@ class WhisperIndicatorApp:
         Keybinder.bind(self.mic_hotkey, self.toggle_mic_transcription)
         Keybinder.bind(self.mic_and_output_hotkey, self.toggle_recording_mic_and_output)
 
-    def setup_timers(self) -> None:
-        """Set up timers to process text queue and check server status.
-        These timers run regardless of whether the recording is active or not."""
-        GLib.timeout_add(100, self.process_text_queue)
+    def set_up_server_status_check_timer(self) -> None:
+        """Set up a timer to check the connection status to the whisper server."""
         self.server_check_timer = GLib.timeout_add(5000, self.check_server_status)
 
     def check_server_status(self) -> bool:
@@ -604,6 +602,7 @@ class WhisperIndicatorApp:
         self.session_start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
         if self.start_mic_recording_and_streaming_processes():
+            GLib.timeout_add(50, self.process_text_queue)
             self.recording_duration = 0
             self.recording_start_time = time.time()
             self.indicator.set_label(f"0/{self.max_recording_duration}s", "")
@@ -663,7 +662,7 @@ class WhisperIndicatorApp:
                 ["nc", self.config["server"]["host"], self.config["server"]["port"]],
                 stdin=self.audio_process_for_mic_transcription.stdout,
                 stdout=subprocess.PIPE,
-                # stderr=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 preexec_fn=os.setsid,
             )
 
